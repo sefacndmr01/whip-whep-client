@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHIP Publisher — whip-whep-client</title>
+</head>
+<body>
+
+<h1>WHIP Publisher</h1>
+<p>Publishes your camera and microphone to a WHIP-compatible ingest endpoint.</p>
+
+<fieldset>
+    <legend>Configuration</legend>
+    <p>
+        <label for="endpoint">WHIP Endpoint URL</label><br>
+        <input id="endpoint" type="url" size="60" placeholder="https://ingest.example.com/whip/live" value="">
+    </p>
+    <p>
+        <label for="token">Bearer Token (optional)</label><br>
+        <input id="token" type="text" size="60" placeholder="leave blank if not required" value="">
+    </p>
+    <p>
+        <label>
+            <input id="simulcast" type="checkbox">
+            Enable simulcast
+        </label>
+    </p>
+</fieldset>
+
+<p>
+    <button id="btn-start">Start Publishing</button>
+    <button id="btn-stop" disabled>Stop</button>
+</p>
+
+<p>Status: <strong id="status">idle</strong></p>
+<p id="error-box" hidden style="border:1px solid; padding:0.5em"></p>
+
+<video id="preview" autoplay muted playsinline width="640" height="360"
+       style="display:none; background:#000"></video>
+
+<h2>Log</h2>
+<pre id="log" style="height:200px; overflow-y:auto; border:1px solid; padding:0.5em"></pre>
+
+<script type="module">
+    import { WHIPClient } from '../../dist/index.mjs';
+
+    const endpointEl  = document.getElementById('endpoint');
+    const tokenEl     = document.getElementById('token');
+    const simulcastEl = document.getElementById('simulcast');
+    const btnStart    = document.getElementById('btn-start');
+    const btnStop     = document.getElementById('btn-stop');
+    const statusEl    = document.getElementById('status');
+    const errorBox    = document.getElementById('error-box');
+    const preview     = document.getElementById('preview');
+    const logEl       = document.getElementById('log');
+
+    let client = null;
+
+    function log(msg) {
+        const ts = new Date().toISOString().substring(11, 23);
+        logEl.textContent += `[${ts}] ${msg}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setStatus(text) {
+        statusEl.textContent = text;
+        log(`status → ${text}`);
+    }
+
+    function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.hidden = false;
+    }
+
+    function clearError() {
+        errorBox.textContent = '';
+        errorBox.hidden = true;
+    }
+
+    btnStart.addEventListener('click', async () => {
+        clearError();
+
+        const endpoint = endpointEl.value.trim();
+        if (!endpoint) {
+            showError('Please enter a WHIP endpoint URL.');
+            return;
+        }
+
+        btnStart.disabled = true;
+
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (err) {
+            showError(`Camera/microphone access denied: ${err.message}`);
+            btnStart.disabled = false;
+            return;
+        }
+
+        preview.srcObject = stream;
+        preview.style.display = 'block';
+
+        const options = { endpoint };
+        if (tokenEl.value.trim()) options.token = tokenEl.value.trim();
+        if (simulcastEl.checked)  options.simulcast = true;
+
+        client = new WHIPClient(options);
+
+        client.on('connected',    ()    => setStatus('connected'));
+        client.on('disconnected', ()    => setStatus('disconnected'));
+        client.on('failed',       (err) => { setStatus('failed'); showError(err.message); });
+
+        client.on('connectionstatechange', (state) => log(`connectionstatechange → ${state}`));
+        client.on('iceconnectionstatechange', (state) => log(`iceconnectionstatechange → ${state}`));
+
+        setStatus('connecting…');
+
+        try {
+            await client.publish(stream);
+            btnStop.disabled = false;
+            log('publish() resolved — ICE negotiation complete');
+        } catch (err) {
+            setStatus('error');
+            showError(err.message);
+            log(`publish() threw: ${err.message}`);
+            preview.style.display = 'none';
+            stream.getTracks().forEach(t => t.stop());
+            client = null;
+            btnStart.disabled = false;
+        }
+    });
+
+    btnStop.addEventListener('click', async () => {
+        if (!client) return;
+        btnStop.disabled = true;
+        setStatus('stopping…');
+        try {
+            await client.stop();
+        } catch (err) {
+            log(`stop() threw: ${err.message}`);
+        }
+        preview.srcObject?.getTracks().forEach(t => t.stop());
+        preview.srcObject = null;
+        preview.style.display = 'none';
+        client = null;
+        setStatus('stopped');
+        btnStart.disabled = false;
+    });
+</script>
+
+</body>
+</html>

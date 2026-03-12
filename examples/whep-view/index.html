@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHEP Viewer — whip-whep-client</title>
+</head>
+<body>
+
+<h1>WHEP Viewer</h1>
+<p>Subscribes to a live stream from a WHEP-compatible server.</p>
+
+<fieldset>
+    <legend>Configuration</legend>
+    <p>
+        <label for="endpoint">WHEP Endpoint URL</label><br>
+        <input id="endpoint" type="url" size="60" placeholder="https://cdn.example.com/whep/stream/abc" value="">
+    </p>
+    <p>
+        <label for="token">Bearer Token (optional)</label><br>
+        <input id="token" type="text" size="60" placeholder="leave blank if not required" value="">
+    </p>
+    <p>
+        <label>
+            <input id="autoReconnect" type="checkbox" checked>
+            Auto-reconnect on failure
+        </label>
+    </p>
+</fieldset>
+
+<p>
+    <button id="btn-start">Watch</button>
+    <button id="btn-stop" disabled>Stop</button>
+</p>
+
+<p>Status: <strong id="status">idle</strong></p>
+<p id="error-box" hidden style="border:1px solid; padding:0.5em"></p>
+
+<video id="player" autoplay playsinline controls width="640" height="360"
+       style="display:none; background:#000"></video>
+
+<table id="stats-table" hidden border="1" cellpadding="4" cellspacing="0">
+    <caption>Live Stats (updated every 2 s)</caption>
+    <thead>
+        <tr>
+            <th>Quality</th>
+            <th>RTT (ms)</th>
+            <th>Audio bitrate</th>
+            <th>Audio loss</th>
+            <th>Video bitrate</th>
+            <th>Video loss</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr id="stats-row">
+            <td id="s-quality">—</td>
+            <td id="s-rtt">—</td>
+            <td id="s-audio-br">—</td>
+            <td id="s-audio-loss">—</td>
+            <td id="s-video-br">—</td>
+            <td id="s-video-loss">—</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Log</h2>
+<pre id="log" style="height:200px; overflow-y:auto; border:1px solid; padding:0.5em"></pre>
+
+<script type="module">
+    import { WHEPClient } from '../../dist/index.mjs';
+
+    const endpointEl      = document.getElementById('endpoint');
+    const tokenEl         = document.getElementById('token');
+    const autoReconnectEl = document.getElementById('autoReconnect');
+    const btnStart        = document.getElementById('btn-start');
+    const btnStop         = document.getElementById('btn-stop');
+    const statusEl        = document.getElementById('status');
+    const errorBox        = document.getElementById('error-box');
+    const player          = document.getElementById('player');
+    const statsTable      = document.getElementById('stats-table');
+    const logEl           = document.getElementById('log');
+
+    let client     = null;
+    let statsTimer = null;
+
+    function log(msg) {
+        const ts = new Date().toISOString().substring(11, 23);
+        logEl.textContent += `[${ts}] ${msg}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setStatus(text) {
+        statusEl.textContent = text;
+        log(`status → ${text}`);
+    }
+
+    function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.hidden = false;
+    }
+
+    function clearError() {
+        errorBox.textContent = '';
+        errorBox.hidden = true;
+    }
+
+    function fmt(bps) {
+        if (bps === 0) return '—';
+        return bps > 1_000_000
+            ? `${(bps / 1_000_000).toFixed(2)} Mbps`
+            : `${(bps / 1_000).toFixed(1)} kbps`;
+    }
+
+    function pct(rate) {
+        return rate > 0 ? `${(rate * 100).toFixed(2)} %` : '0 %';
+    }
+
+    function startStatsPolling() {
+        statsTable.hidden = false;
+        statsTimer = setInterval(async () => {
+            if (!client) return;
+            try {
+                const s = await client.getStats();
+                document.getElementById('s-quality').textContent    = s.quality;
+                document.getElementById('s-rtt').textContent        = s.roundTripTime !== null ? `${(s.roundTripTime * 1000).toFixed(0)} ms` : '—';
+                document.getElementById('s-audio-br').textContent   = s.audio ? fmt(s.audio.bitrate) : '—';
+                document.getElementById('s-audio-loss').textContent = s.audio ? pct(s.audio.packetsLostRate) : '—';
+                document.getElementById('s-video-br').textContent   = s.video ? fmt(s.video.bitrate) : '—';
+                document.getElementById('s-video-loss').textContent = s.video ? pct(s.video.packetsLostRate) : '—';
+            } catch {
+                // ignore stats errors
+            }
+        }, 2000);
+    }
+
+    function stopStatsPolling() {
+        clearInterval(statsTimer);
+        statsTimer = null;
+        statsTable.hidden = true;
+    }
+
+    btnStart.addEventListener('click', async () => {
+        clearError();
+
+        const endpoint = endpointEl.value.trim();
+        if (!endpoint) {
+            showError('Please enter a WHEP endpoint URL.');
+            return;
+        }
+
+        btnStart.disabled = true;
+
+        const options = { endpoint };
+        if (tokenEl.value.trim())      options.token         = tokenEl.value.trim();
+        if (autoReconnectEl.checked)   options.autoReconnect = true;
+
+        client = new WHEPClient(options);
+
+        client.on('stream', (stream) => {
+            player.srcObject = stream;
+            player.style.display = 'block';
+            log('stream event — attaching to <video>');
+            startStatsPolling();
+        });
+
+        client.on('connected',    ()    => setStatus('connected'));
+        client.on('disconnected', ()    => setStatus('disconnected'));
+        client.on('failed',       (err) => { setStatus('failed'); showError(err.message); });
+
+        client.on('reconnecting', (attempt, delayMs) => {
+            setStatus(`reconnecting (attempt ${attempt}, delay ${delayMs} ms)…`);
+        });
+        client.on('reconnected', () => setStatus('reconnected'));
+
+        client.on('connectionstatechange',    (s) => log(`connectionstatechange → ${s}`));
+        client.on('iceconnectionstatechange', (s) => log(`iceconnectionstatechange → ${s}`));
+
+        setStatus('connecting…');
+
+        try {
+            await client.view();
+            btnStop.disabled = false;
+            log('view() resolved — SDP exchange complete');
+        } catch (err) {
+            setStatus('error');
+            showError(err.message);
+            log(`view() threw: ${err.message}`);
+            client = null;
+            btnStart.disabled = false;
+        }
+    });
+
+    btnStop.addEventListener('click', async () => {
+        if (!client) return;
+        btnStop.disabled = true;
+        stopStatsPolling();
+        setStatus('stopping…');
+        try {
+            await client.stop();
+        } catch (err) {
+            log(`stop() threw: ${err.message}`);
+        }
+        player.srcObject = null;
+        player.style.display = 'none';
+        client = null;
+        setStatus('stopped');
+        btnStart.disabled = false;
+    });
+</script>
+
+</body>
+</html>
