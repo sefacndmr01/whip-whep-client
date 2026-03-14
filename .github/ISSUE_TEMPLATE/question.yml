@@ -1,0 +1,60 @@
+name: Question / Support
+description: Ask a question about usage, integration, or expected behaviour.
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This tracker is for questions directly related to **whip-whep-client**.
+        For general WebRTC or WHIP/WHEP questions, consider asking on
+        [Stack Overflow](https://stackoverflow.com/questions/tagged/webrtc) or the
+        [IETF WISH mailing list](https://mailarchive.ietf.org/arch/browse/wish/).
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic
+      options:
+        - Getting started / basic usage
+        - WHIPClient (publishing)
+        - WHEPClient (viewing)
+        - Auto-reconnect / reconnect()
+        - Statistics / getStats
+        - ICE / STUN / TURN configuration
+        - Authentication / custom headers
+        - Simulcast or bitrate options
+        - Server compatibility / presets
+        - TypeScript types
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know? Please provide as much context as possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Relevant code
+      description: Share any code you are working with, if applicable.
+      render: typescript
+
+  - type: input
+    id: version
+    attributes:
+      label: whip-whep-client version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Browser, server (e.g. LiveKit, OvenMedia Engine), or any other relevant details.

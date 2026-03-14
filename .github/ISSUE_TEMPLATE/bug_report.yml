@@ -1,0 +1,99 @@
+name: Bug Report
+description: Report a reproducible bug or unexpected behaviour.
+title: "fix: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a bug report, please search existing issues to avoid duplicates.
+        If you need help rather than reporting a bug, use the **Question / Support** template instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: "When I call `client.publish()` with `autoReconnect: true`, the reconnect loop does not stop after `client.stop()` is called."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Minimal code that reproduces the issue. The simpler, the better.
+        If the issue is browser-specific, note which browser and version you tested in.
+      render: typescript
+      placeholder: |
+        import { WHIPClient } from 'whip-whep-client';
+
+        const client = new WHIPClient({
+            endpoint: 'https://ingest.example.com/whip/live',
+            autoReconnect: true,
+        });
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        await client.publish(stream);
+
+        // Simulate failure
+        // ...
+
+        await client.stop(); // reconnect loop continues unexpectedly
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happens? Include any console errors or stack traces.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: whip-whep-client version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      multiple: true
+      options:
+        - Chrome / Chromium
+        - Firefox
+        - Safari
+        - Edge
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Any other relevant environment details (OS, bundler, Node.js version used for build, etc.).
+      placeholder: |
+        OS: macOS 15.3
+        Bundler: Vite 6.2
+        Node.js: 22.14 (build only)
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might help — screenshots, network logs, SDP output, etc.

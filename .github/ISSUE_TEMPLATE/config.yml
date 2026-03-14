@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Stack Overflow — WebRTC
+    url: https://stackoverflow.com/questions/tagged/webrtc
+    about: General WebRTC questions and troubleshooting.
+  - name: IETF WISH Mailing List
+    url: https://mailarchive.ietf.org/arch/browse/wish/
+    about: Discussions about the WHIP and WHEP protocol specifications.
+  - name: RFC 9725 — WHIP
+    url: https://www.rfc-editor.org/rfc/rfc9725
+    about: Official WebRTC-HTTP Ingestion Protocol specification.
+  - name: draft-ietf-wish-whep — WHEP
+    url: https://datatracker.ietf.org/doc/draft-ietf-wish-whep/
+    about: Official WebRTC-HTTP Egress Protocol draft specification.

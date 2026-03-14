@@ -1,0 +1,75 @@
+name: Feature Request
+description: Propose a new feature or an enhancement to an existing one.
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please search existing issues and open pull requests to avoid duplicates.
+        For questions or help with usage, use the **Question / Support** template instead.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which area of the library does this request relate to?
+      options:
+        - WHIPClient (publishing)
+        - WHEPClient (viewing)
+        - Auto-reconnect
+        - Statistics / getStats
+        - ICE / TURN configuration
+        - SDP utilities
+        - Media utilities (getScreenStream / getUserStream)
+        - Server presets
+        - TypeScript types
+        - Build / bundling
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: |
+        Describe the problem or limitation you are running into.
+        Explaining the motivation helps maintainers evaluate the request more accurately.
+      placeholder: "I need to support WHIP servers that require a custom SDP transformation before the offer is sent, and currently there is no hook to do this."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the change you would like to see, including any API design ideas.
+        Code sketches are welcome.
+      render: typescript
+      placeholder: |
+        // Proposed API
+        const client = new WHIPClient({
+            endpoint: '...',
+            transformOffer: (sdp: string): string => {
+                return sdp.replace('...');
+            },
+        });
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Describe any alternative solutions or workarounds you have already tried or considered,
+        and why they are not sufficient.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links to related RFCs, server documentation, other libraries that implement this, etc.
