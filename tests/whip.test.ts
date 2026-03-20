@@ -227,11 +227,17 @@ describe('WHIPClient', () => {
 		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
 		await client.publish(makeMockStream());
 
-		const newTrack = { kind: 'video', stop: vi.fn(), id: 'new-video' } as unknown as MediaStreamTrack;
+		const newTrack = {
+			kind: 'video',
+			stop: vi.fn(),
+			id: 'new-video',
+		} as unknown as MediaStreamTrack;
 		await client.replaceTrack('video', newTrack);
 
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
-		const sender = pc.getSenders().find((s) => s instanceof MockRTCRtpSender && s.track?.id === 'new-video');
+		const sender = pc
+			.getSenders()
+			.find((s) => s instanceof MockRTCRtpSender && s.track?.id === 'new-video');
 		expect(sender).toBeDefined();
 	});
 
@@ -239,7 +245,12 @@ describe('WHIPClient', () => {
 		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
 		await client.publish(makeMockStream(['audio', 'video']));
 
-		const newTrack = { kind: 'audio', stop: vi.fn(), id: 'new-audio', contentHint: '' } as unknown as MediaStreamTrack;
+		const newTrack = {
+			kind: 'audio',
+			stop: vi.fn(),
+			id: 'new-audio',
+			contentHint: '',
+		} as unknown as MediaStreamTrack;
 		await client.replaceTrack('audio', newTrack);
 
 		const lastStream = (client as unknown as { _lastStream: MediaStream })._lastStream!;
@@ -275,10 +286,18 @@ describe('WHIPClient', () => {
 
 		// Set up mock stats: 1000 bytes sent for audio, 5000 for video
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
-		pc.setMockStats(new Map([
-			['outbound-audio', { type: 'outbound-rtp', kind: 'audio', bytesSent: 0, packetsSent: 0 }],
-			['outbound-video', { type: 'outbound-rtp', kind: 'video', bytesSent: 0, packetsSent: 0 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				[
+					'outbound-audio',
+					{ type: 'outbound-rtp', kind: 'audio', bytesSent: 0, packetsSent: 0 },
+				],
+				[
+					'outbound-video',
+					{ type: 'outbound-rtp', kind: 'video', bytesSent: 0, packetsSent: 0 },
+				],
+			]),
+		);
 
 		const stats = await client.getStats();
 		// No bytes yet → null audio and video
@@ -293,19 +312,45 @@ describe('WHIPClient', () => {
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
 
 		// First call establishes the baseline snapshot
-		pc.setMockStats(new Map([
-			['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 1000, packetsSent: 100 }],
-			['v', { type: 'outbound-rtp', kind: 'video', bytesSent: 10000, packetsSent: 200, framesPerSecond: 30, frameWidth: 1280, frameHeight: 720 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 1000, packetsSent: 100 }],
+				[
+					'v',
+					{
+						type: 'outbound-rtp',
+						kind: 'video',
+						bytesSent: 10000,
+						packetsSent: 200,
+						framesPerSecond: 30,
+						frameWidth: 1280,
+						frameHeight: 720,
+					},
+				],
+			]),
+		);
 		await client.getStats();
 
 		// Wait briefly then call again with more bytes
 		await new Promise((r) => setTimeout(r, 50));
 
-		pc.setMockStats(new Map([
-			['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 2000, packetsSent: 110 }],
-			['v', { type: 'outbound-rtp', kind: 'video', bytesSent: 60000, packetsSent: 210, framesPerSecond: 30, frameWidth: 1280, frameHeight: 720 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 2000, packetsSent: 110 }],
+				[
+					'v',
+					{
+						type: 'outbound-rtp',
+						kind: 'video',
+						bytesSent: 60000,
+						packetsSent: 210,
+						framesPerSecond: 30,
+						frameWidth: 1280,
+						frameHeight: 720,
+					},
+				],
+			]),
+		);
 		const stats = await client.getStats();
 
 		expect(stats.audio).not.toBeNull();
@@ -324,21 +369,34 @@ describe('WHIPClient', () => {
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
 
 		// Baseline
-		pc.setMockStats(new Map([
-			['v-high', { type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 10 }],
-			['v-mid',  { type: 'outbound-rtp', kind: 'video', bytesSent: 500,  packetsSent: 5 }],
-			['v-low',  { type: 'outbound-rtp', kind: 'video', bytesSent: 200,  packetsSent: 2 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				[
+					'v-high',
+					{ type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 10 },
+				],
+				['v-mid', { type: 'outbound-rtp', kind: 'video', bytesSent: 500, packetsSent: 5 }],
+				['v-low', { type: 'outbound-rtp', kind: 'video', bytesSent: 200, packetsSent: 2 }],
+			]),
+		);
 		await client.getStats();
 
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Each layer sends more bytes
-		pc.setMockStats(new Map([
-			['v-high', { type: 'outbound-rtp', kind: 'video', bytesSent: 3000, packetsSent: 30 }],
-			['v-mid',  { type: 'outbound-rtp', kind: 'video', bytesSent: 1500, packetsSent: 15 }],
-			['v-low',  { type: 'outbound-rtp', kind: 'video', bytesSent: 600,  packetsSent: 6 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				[
+					'v-high',
+					{ type: 'outbound-rtp', kind: 'video', bytesSent: 3000, packetsSent: 30 },
+				],
+				[
+					'v-mid',
+					{ type: 'outbound-rtp', kind: 'video', bytesSent: 1500, packetsSent: 15 },
+				],
+				['v-low', { type: 'outbound-rtp', kind: 'video', bytesSent: 600, packetsSent: 6 }],
+			]),
+		);
 		const stats = await client.getStats();
 
 		// Aggregated: (3000+1500+600) = 5100 total, delta = 5100-1700 = 3400 bytes
@@ -351,10 +409,23 @@ describe('WHIPClient', () => {
 		await client.publish(makeMockStream());
 
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
-		pc.setMockStats(new Map([
-			['v-out', { type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 100 }],
-			['v-in',  { type: 'remote-inbound-rtp', kind: 'video', packetsLost: 50, roundTripTime: 0.02 }],
-		]));
+		pc.setMockStats(
+			new Map([
+				[
+					'v-out',
+					{ type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 100 },
+				],
+				[
+					'v-in',
+					{
+						type: 'remote-inbound-rtp',
+						kind: 'video',
+						packetsLost: 50,
+						roundTripTime: 0.02,
+					},
+				],
+			]),
+		);
 
 		const stats = await client.getStats();
 		// 50 lost / (100 + 50) = 33% loss → poor
