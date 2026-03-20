@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WHIPClient } from '../src/whip/WHIPClient.js';
 import { WHIPError, InvalidStateError } from '../src/core/errors.js';
 import type { MockRTCPeerConnection } from './setup.js';
-import { MOCK_SDP_ANSWER } from './setup.js';
+import { MOCK_SDP_ANSWER, MockRTCRtpSender } from './setup.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,5 +219,146 @@ describe('WHIPClient', () => {
 		const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
 		const body = init.body as string;
 		expect(body).toContain('a=simulcast:send high;mid;low');
+	});
+
+	// ---- replaceTrack() ------------------------------------------------------
+
+	it('replaceTrack replaces the active sender track', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream());
+
+		const newTrack = { kind: 'video', stop: vi.fn(), id: 'new-video' } as unknown as MediaStreamTrack;
+		await client.replaceTrack('video', newTrack);
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+		const sender = pc.getSenders().find((s) => s instanceof MockRTCRtpSender && s.track?.id === 'new-video');
+		expect(sender).toBeDefined();
+	});
+
+	it('replaceTrack updates _lastStream with the new track', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream(['audio', 'video']));
+
+		const newTrack = { kind: 'audio', stop: vi.fn(), id: 'new-audio', contentHint: '' } as unknown as MediaStreamTrack;
+		await client.replaceTrack('audio', newTrack);
+
+		const lastStream = (client as unknown as { _lastStream: MediaStream })._lastStream!;
+		expect(lastStream.getAudioTracks().find((t) => t.id === 'new-audio')).toBeDefined();
+	});
+
+	it('replaceTrack throws InvalidStateError when no active peer connection', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		const newTrack = { kind: 'video', stop: vi.fn(), id: 'v' } as unknown as MediaStreamTrack;
+
+		await expect(client.replaceTrack('video', newTrack)).rejects.toThrow(InvalidStateError);
+	});
+
+	it('replaceTrack throws InvalidStateError when no sender for kind', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		// Publish audio-only stream → no video sender
+		await client.publish(makeMockStream(['audio']));
+
+		const newTrack = { kind: 'video', stop: vi.fn(), id: 'v' } as unknown as MediaStreamTrack;
+		await expect(client.replaceTrack('video', newTrack)).rejects.toThrow(InvalidStateError);
+	});
+
+	// ---- getStats() ----------------------------------------------------------
+
+	it('getStats throws InvalidStateError when no active peer connection', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await expect(client.getStats()).rejects.toThrow(InvalidStateError);
+	});
+
+	it('getStats returns null audio/video on first call (no previous snapshot)', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream());
+
+		// Set up mock stats: 1000 bytes sent for audio, 5000 for video
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+		pc.setMockStats(new Map([
+			['outbound-audio', { type: 'outbound-rtp', kind: 'audio', bytesSent: 0, packetsSent: 0 }],
+			['outbound-video', { type: 'outbound-rtp', kind: 'video', bytesSent: 0, packetsSent: 0 }],
+		]));
+
+		const stats = await client.getStats();
+		// No bytes yet → null audio and video
+		expect(stats.audio).toBeNull();
+		expect(stats.video).toBeNull();
+	});
+
+	it('getStats computes bitrate delta between two calls', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream());
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+
+		// First call establishes the baseline snapshot
+		pc.setMockStats(new Map([
+			['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 1000, packetsSent: 100 }],
+			['v', { type: 'outbound-rtp', kind: 'video', bytesSent: 10000, packetsSent: 200, framesPerSecond: 30, frameWidth: 1280, frameHeight: 720 }],
+		]));
+		await client.getStats();
+
+		// Wait briefly then call again with more bytes
+		await new Promise((r) => setTimeout(r, 50));
+
+		pc.setMockStats(new Map([
+			['a', { type: 'outbound-rtp', kind: 'audio', bytesSent: 2000, packetsSent: 110 }],
+			['v', { type: 'outbound-rtp', kind: 'video', bytesSent: 60000, packetsSent: 210, framesPerSecond: 30, frameWidth: 1280, frameHeight: 720 }],
+		]));
+		const stats = await client.getStats();
+
+		expect(stats.audio).not.toBeNull();
+		expect(stats.video).not.toBeNull();
+		expect(stats.audio!.bitrate).toBeGreaterThan(0);
+		expect(stats.video!.bitrate).toBeGreaterThan(0);
+		expect(stats.video!.frameRate).toBe(30);
+		expect(stats.video!.width).toBe(1280);
+		expect(stats.video!.height).toBe(720);
+	});
+
+	it('getStats aggregates video bytes across simulcast layers', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip', simulcast: true });
+		await client.publish(makeMockStream());
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+
+		// Baseline
+		pc.setMockStats(new Map([
+			['v-high', { type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 10 }],
+			['v-mid',  { type: 'outbound-rtp', kind: 'video', bytesSent: 500,  packetsSent: 5 }],
+			['v-low',  { type: 'outbound-rtp', kind: 'video', bytesSent: 200,  packetsSent: 2 }],
+		]));
+		await client.getStats();
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Each layer sends more bytes
+		pc.setMockStats(new Map([
+			['v-high', { type: 'outbound-rtp', kind: 'video', bytesSent: 3000, packetsSent: 30 }],
+			['v-mid',  { type: 'outbound-rtp', kind: 'video', bytesSent: 1500, packetsSent: 15 }],
+			['v-low',  { type: 'outbound-rtp', kind: 'video', bytesSent: 600,  packetsSent: 6 }],
+		]));
+		const stats = await client.getStats();
+
+		// Aggregated: (3000+1500+600) = 5100 total, delta = 5100-1700 = 3400 bytes
+		expect(stats.video).not.toBeNull();
+		expect(stats.video!.bitrate).toBeGreaterThan(0);
+	});
+
+	it('getStats quality reflects loss rate', async () => {
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream());
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+		pc.setMockStats(new Map([
+			['v-out', { type: 'outbound-rtp', kind: 'video', bytesSent: 1000, packetsSent: 100 }],
+			['v-in',  { type: 'remote-inbound-rtp', kind: 'video', packetsLost: 50, roundTripTime: 0.02 }],
+		]));
+
+		const stats = await client.getStats();
+		// 50 lost / (100 + 50) = 33% loss → poor
+		expect(stats.quality).toBe('poor');
+		expect(stats.roundTripTime).toBe(0.02);
 	});
 });
