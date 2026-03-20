@@ -1,6 +1,6 @@
 {
   "name": "whip-whep-client",
-  "version": "0.3.1",
+  "version": "1.0.0",
   "description": "A modern, TypeScript-first WHIP/WHEP client library for WebRTC streaming in the browser",
   "author": "sefacndmr01",
   "license": "MIT",

@@ -2,9 +2,11 @@
 
 A modern, TypeScript-first client library for the **WHIP** and **WHEP** WebRTC streaming protocols.
 
-[CI](https://github.com/sefacndmr01/whip-whep-client/actions)
-[npm version](https://www.npmjs.com/package/whip-whep-client)
-[License: MIT](LICENSE)
+[![npm](https://img.shields.io/npm/v/whip-whep-client)](https://www.npmjs.com/package/whip-whep-client)
+[![CI](https://github.com/sefacndmr01/whip-whep-client/actions/workflows/release.yml/badge.svg)](https://github.com/sefacndmr01/whip-whep-client/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/whip-whep-client)](https://www.npmjs.com/package/whip-whep-client)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
 ---
 
