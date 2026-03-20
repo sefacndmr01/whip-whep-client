@@ -3,8 +3,6 @@ import type {
 	WHIPClientOptions,
 	WHIPClientEvents,
 	PublishOptions,
-	AudioEncodingOptions,
-	VideoLayerOptions,
 	StreamStats,
 	AudioStats,
 	VideoStats,
@@ -12,17 +10,13 @@ import type {
 import { WHIPError, InvalidStateError } from '../core/errors.js';
 import { preferCodec, addSimulcast, setBandwidth, patchFmtp } from '../utils/sdp.js';
 import { setupIceTrickle } from '../utils/ice.js';
-import { computeQuality } from '../utils/stats.js';
-
-// ---------------------------------------------------------------------------
-// Constants – default simulcast layer configuration
-// ---------------------------------------------------------------------------
-
-const DEFAULT_SIMULCAST_LAYERS: VideoLayerOptions[] = [
-	{ rid: 'high', active: true, maxBitrate: 2_500_000, scaleResolutionDownBy: 1 },
-	{ rid: 'mid', active: true, maxBitrate: 1_000_000, scaleResolutionDownBy: 2 },
-	{ rid: 'low', active: true, maxBitrate: 300_000, scaleResolutionDownBy: 4 },
-];
+import { computeQuality, type StatsSnapshot } from '../utils/stats.js';
+import {
+	DEFAULT_SIMULCAST_LAYERS,
+	toRtcEncoding,
+	applyLayerToEncoding,
+	buildOpusFmtp,
+} from './encodings.js';
 
 // ---------------------------------------------------------------------------
 // WHIPClient
@@ -74,8 +68,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 
 	private _lastStream: MediaStream | null = null;
 	private _lastPublishOptions: PublishOptions = {};
-	private _statsSnapshot: { timestamp: number; audioBytes: number; videoBytes: number } | null =
-		null;
+	private _statsSnapshot: StatsSnapshot | null = null;
 
 	constructor(options: WHIPClientOptions) {
 		super(options);
@@ -272,23 +265,26 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 					frameHeight?: number;
 				};
 				if (s.kind === 'audio') {
-					audioBytesSent = s.bytesSent ?? 0;
-					audioPacketsSent = s.packetsSent ?? 0;
+					audioBytesSent += s.bytesSent ?? 0;
+					audioPacketsSent += s.packetsSent ?? 0;
 				} else if (s.kind === 'video') {
-					videoBytesSent = s.bytesSent ?? 0;
-					videoPacketsSent = s.packetsSent ?? 0;
-					frameRate = s.framesPerSecond ?? 0;
-					frameWidth = s.frameWidth ?? 0;
-					frameHeight = s.frameHeight ?? 0;
+					// Accumulate across simulcast layers
+					videoBytesSent += s.bytesSent ?? 0;
+					videoPacketsSent += s.packetsSent ?? 0;
+					// Use stats from the first (highest-bitrate) layer
+					if (frameRate === 0) frameRate = s.framesPerSecond ?? 0;
+					if (frameWidth === 0) frameWidth = s.frameWidth ?? 0;
+					if (frameHeight === 0) frameHeight = s.frameHeight ?? 0;
 				}
 			}
 			if (stat.type === 'remote-inbound-rtp') {
 				const s = stat as RTCInboundRtpStreamStats & { roundTripTime?: number };
 				if (s.kind === 'audio') {
-					audioPacketsLost = s.packetsLost ?? 0;
+					audioPacketsLost += s.packetsLost ?? 0;
 					audioJitter = s.jitter ?? 0;
 				} else if (s.kind === 'video') {
-					videoPacketsLost = s.packetsLost ?? 0;
+					// Accumulate lost packets across simulcast layers
+					videoPacketsLost += s.packetsLost ?? 0;
 					if (s.roundTripTime !== undefined) roundTripTime = s.roundTripTime;
 				}
 			}
@@ -375,7 +371,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 	private buildSimulcastEncodings(): RTCRtpEncodingParameters[] {
 		const videoOpts = this.whipOptions.video;
 		const layers = Array.isArray(videoOpts) ? videoOpts : DEFAULT_SIMULCAST_LAYERS;
-		return layers.map((layer) => toRtcEncoding(layer));
+		return layers.map(toRtcEncoding);
 	}
 
 	private buildSingleEncoding(): RTCRtpEncodingParameters[] {
@@ -399,7 +395,6 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		if (this.whipOptions.maxBandwidth && this.whipOptions.maxBandwidth > 0)
 			result = setBandwidth(result, 'session', this.whipOptions.maxBandwidth);
 
-		// Opus fmtp parameters
 		const audioEnc = this.whipOptions.audio;
 		if (audioEnc) {
 			const fmtpParams = buildOpusFmtp(audioEnc);
@@ -417,17 +412,11 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 	/**
 	 * Apply bitrate and degradation-preference constraints via
 	 * `RTCRtpSender.setParameters()` after `setRemoteDescription`.
-	 *
-	 * This is more reliable than SDP munging for per-sender limits because
-	 * it does not require re-negotiation and is supported by all major
-	 * browsers.
 	 */
 	private async applyEncodingConstraints(pc: RTCPeerConnection): Promise<void> {
 		for (const sender of pc.getSenders()) {
 			if (!sender.track) continue;
-
-			const isAudio = sender.track.kind === 'audio';
-			await (isAudio
+			await (sender.track.kind === 'audio'
 				? this.applyAudioConstraints(sender)
 				: this.applyVideoConstraints(sender));
 		}
@@ -440,9 +429,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		const params = sender.getParameters();
 		if (!params.encodings?.length) return;
 
-		for (const enc of params.encodings) {
-			enc.maxBitrate = audioOpts.maxBitrate;
-		}
+		for (const enc of params.encodings) enc.maxBitrate = audioOpts.maxBitrate;
 
 		await sender.setParameters(params).catch(() => {
 			// setParameters can fail if the connection is not yet fully established
@@ -459,13 +446,10 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		if (Array.isArray(videoOpts)) {
 			for (const enc of params.encodings) {
 				const layerOpts = videoOpts.find((l) => l.rid === enc.rid) ?? videoOpts[0];
-				if (!layerOpts) continue;
-				applyLayerToEncoding(enc, layerOpts);
+				if (layerOpts) applyLayerToEncoding(enc, layerOpts);
 			}
 		} else {
-			for (const enc of params.encodings) {
-				applyLayerToEncoding(enc, videoOpts);
-			}
+			for (const enc of params.encodings) applyLayerToEncoding(enc, videoOpts);
 		}
 
 		await sender.setParameters(params).catch(() => {
@@ -488,44 +472,4 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		this._statsSnapshot = null;
 		await this.publish(this._lastStream!, this._lastPublishOptions);
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Module-private helpers
-// ---------------------------------------------------------------------------
-
-function toRtcEncoding(layer: VideoLayerOptions): RTCRtpEncodingParameters {
-	const enc: RTCRtpEncodingParameters = { active: layer.active ?? true };
-
-	if (layer.rid !== undefined) enc.rid = layer.rid;
-	if (layer.maxBitrate !== undefined) enc.maxBitrate = layer.maxBitrate;
-	if (layer.maxFramerate !== undefined) enc.maxFramerate = layer.maxFramerate;
-	if (layer.scaleResolutionDownBy !== undefined)
-		enc.scaleResolutionDownBy = layer.scaleResolutionDownBy;
-
-	// `degradationPreference` was removed from the per-encoding spec and is
-	// not present in current TypeScript DOM types. It is kept in
-	// `VideoLayerOptions` for forward-compatibility but not applied here.
-
-	return enc;
-}
-
-function applyLayerToEncoding(enc: RTCRtpEncodingParameters, layer: VideoLayerOptions): void {
-	if (layer.maxBitrate !== undefined) enc.maxBitrate = layer.maxBitrate;
-	if (layer.maxFramerate !== undefined) enc.maxFramerate = layer.maxFramerate;
-	if (layer.scaleResolutionDownBy !== undefined)
-		enc.scaleResolutionDownBy = layer.scaleResolutionDownBy;
-	if (layer.active !== undefined) enc.active = layer.active;
-}
-
-function buildOpusFmtp(opts: AudioEncodingOptions): Record<string, string | number> {
-	const params: Record<string, string | number> = {};
-
-	if (opts.dtx === true) params['usedtx'] = 1;
-	if (opts.stereo === true) params['stereo'] = 1;
-	if (opts.fec === false) params['useinbandfec'] = 0;
-	if (opts.fec === true) params['useinbandfec'] = 1;
-	if (opts.comfortNoise === true) params['usecn'] = 1;
-
-	return params;
 }

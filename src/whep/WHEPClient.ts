@@ -10,7 +10,7 @@ import type {
 import { WHEPError, InvalidStateError } from '../core/errors.js';
 import { preferCodec, setBandwidth } from '../utils/sdp.js';
 import { setupIceTrickle } from '../utils/ice.js';
-import { computeQuality } from '../utils/stats.js';
+import { computeQuality, type StatsSnapshot } from '../utils/stats.js';
 
 /**
  * WHEP (WebRTC-HTTP Egress Protocol) client.
@@ -47,8 +47,7 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 	private cleanupIce: (() => void) | null = null;
 
 	private _lastViewOptions: ViewOptions = {};
-	private _statsSnapshot: { timestamp: number; audioBytes: number; videoBytes: number } | null =
-		null;
+	private _statsSnapshot: StatsSnapshot | null = null;
 
 	constructor(options: WHEPClientOptions) {
 		super(options);
@@ -164,9 +163,7 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 		this.cleanupIce = null;
 
 		if (this.pc) {
-			for (const receiver of this.pc.getReceivers()) {
-				receiver.track.stop();
-			}
+			for (const receiver of this.pc.getReceivers()) receiver.track.stop();
 		}
 
 		await this.deleteResource();
@@ -179,8 +176,6 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 	 * last `view()` call.
 	 *
 	 * The new `MediaStream` is delivered via the `'stream'` event.
-	 *
-	 * @throws {InvalidStateError} When called before `view()` has been called.
 	 */
 	async reconnect(): Promise<void> {
 		this._reconnectToken++;
@@ -234,9 +229,13 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 				}
 			}
 			if (stat.type === 'candidate-pair') {
-				const s = stat as RTCIceCandidatePairStats;
-				if (s.state === 'succeeded' && s.currentRoundTripTime !== undefined)
-					roundTripTime = s.currentRoundTripTime;
+				const s = stat as RTCIceCandidatePairStats & { nominated?: boolean };
+				if (s.currentRoundTripTime !== undefined) {
+					// Prefer the nominated (active) pair; fall back to any succeeded pair
+					if (s.nominated) roundTripTime = s.currentRoundTripTime;
+					else if (s.state === 'succeeded' && roundTripTime === null)
+						roundTripTime = s.currentRoundTripTime;
+				}
 			}
 		}
 
@@ -311,9 +310,7 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 
 	private async _doReconnect(): Promise<void> {
 		if (this.pc) {
-			for (const receiver of this.pc.getReceivers()) {
-				receiver.track.stop();
-			}
+			for (const receiver of this.pc.getReceivers()) receiver.track.stop();
 		}
 		await this.teardownForReconnect();
 		this.setState('idle');

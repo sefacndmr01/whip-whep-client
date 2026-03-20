@@ -90,8 +90,14 @@ class MockRTCPeerConnection {
 		return [...this.receivers];
 	}
 
+	private _mockStats: Map<string, unknown> = new Map();
+
+	setMockStats(entries: Map<string, unknown>) {
+		this._mockStats = entries;
+	}
+
 	async getStats(): Promise<RTCStatsReport> {
-		return new Map() as unknown as RTCStatsReport;
+		return this._mockStats as unknown as RTCStatsReport;
 	}
 
 	async createOffer(): Promise<RTCSessionDescriptionInit> {
@@ -165,6 +171,10 @@ class MockMediaStream {
 
 	addTrack(track: MediaStreamTrack) {
 		this.tracks.push(track);
+	}
+
+	removeTrack(track: MediaStreamTrack) {
+		this.tracks = this.tracks.filter((t) => t !== track);
 	}
 
 	getTracks() {

@@ -98,8 +98,13 @@ export interface StreamStats {
 	/** Video statistics, or `null` when no video track is active. */
 	video: VideoStats | null;
 	/**
-	 * Round-trip time in **seconds** derived from RTCP SR/RR reports.
-	 * `null` until at least one RTCP round-trip measurement is available.
+	 * Round-trip time in **seconds**.
+	 *
+	 * - For `WHIPClient` (sender): derived from RTCP SR/RR reports via
+	 *   `remote-inbound-rtp` stats. `null` until the first RTCP measurement.
+	 * - For `WHEPClient` (receiver): derived from ICE candidate-pair stats
+	 *   (`nominated` pair preferred). `null` until the ICE connection is
+	 *   fully established.
 	 */
 	roundTripTime: number | null;
 	/** Overall connection quality derived from packet loss and RTT. */
