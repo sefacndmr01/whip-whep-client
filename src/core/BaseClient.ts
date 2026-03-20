@@ -54,11 +54,9 @@ export class TypedEventEmitter<TEvents extends EventMap> {
 	}
 
 	removeAllListeners(event?: keyof TEvents): this {
-		if (event !== undefined) {
-			this._listeners.delete(event);
-		} else {
-			this._listeners.clear();
-		}
+		if (event !== undefined) this._listeners.delete(event);
+		else this._listeners.clear();
+
 		return this;
 	}
 }
@@ -225,7 +223,9 @@ export abstract class BaseClient<
 				if (s === 'connected') {
 					cleanup();
 					resolve();
-				} else if (s === 'failed' || s === 'closed') {
+					return;
+				}
+				if (s === 'failed' || s === 'closed') {
 					cleanup();
 					reject(new WhipWhepError(`ICE connection ${s}`));
 				}
@@ -241,8 +241,7 @@ export abstract class BaseClient<
 	}
 
 	/**
-	 * Dispatch connection-state transitions using an object-literal handler
-	 * map instead of a switch statement.
+	 * Dispatch connection-state transitions using an object-literal handler map.
 	 */
 	private handleConnectionStateChange(pc: RTCPeerConnection): void {
 		const state = pc.connectionState;
@@ -274,8 +273,6 @@ export abstract class BaseClient<
 
 	/**
 	 * Type-safe emit for events defined in `BaseClientEvents`.
-	 * Avoids the generic variance issues that arise when calling `this.emit`
-	 * with a string literal key from within the abstract base class.
 	 */
 	private emitBase<K extends keyof BaseClientEvents>(
 		event: K,
@@ -295,21 +292,17 @@ export abstract class BaseClient<
 	 * 2. Static `headers` option
 	 * 3. Dynamic `getHeaders()` return value  ← highest priority
 	 * 4. `extra` (per-call overrides, e.g. `Content-Type` for PATCH)
-	 *
-	 * Later entries win, so callers can override anything via `getHeaders`.
 	 */
 	protected async buildHeaders(extra?: Record<string, string>): Promise<Headers> {
 		const dynamic = this.options.getHeaders ? await this.options.getHeaders() : {};
 
-		const headers = new Headers({
+		return new Headers({
 			'Content-Type': 'application/sdp',
 			...(this.options.token && { Authorization: `Bearer ${this.options.token}` }),
 			...this.options.headers,
 			...dynamic,
 			...extra,
 		});
-
-		return headers;
 	}
 
 	/**
@@ -347,9 +340,11 @@ export abstract class BaseClient<
 		if (response.status !== 201) {
 			const body = await response.text().catch(() => '');
 			const detail = body ? `: ${body}` : '';
-			const msg = `Server returned ${response.status} ${response.statusText}${detail}`;
 			this.options.logger?.error('SDP POST rejected', { status: response.status });
-			throw new WhipWhepError(msg, { status: response.status });
+			throw new WhipWhepError(
+				`Server returned ${response.status} ${response.statusText}${detail}`,
+				{ status: response.status },
+			);
 		}
 
 		const sdpAnswer = await response.text();
@@ -523,7 +518,6 @@ export abstract class BaseClient<
 
 	protected assertIdle(methodName: string): void {
 		if (this._state === 'idle') return;
-
 		throw new InvalidStateError(
 			`Cannot call ${methodName}() when client is in "${this._state}" state. ` +
 				`Use reconnect() to re-establish the connection, or create a new instance.`,
@@ -535,12 +529,12 @@ export abstract class BaseClient<
 // Module-private utilities
 // ---------------------------------------------------------------------------
 
-function resolveUrl(location: string, base: string): string {
+const resolveUrl = (location: string, base: string): string => {
 	try {
 		return new URL(location).href;
 	} catch {
 		return new URL(location, base).href;
 	}
-}
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));

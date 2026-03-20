@@ -29,7 +29,11 @@ interface SdpSection {
  * @param kind           `'audio'` or `'video'`.
  * @param preferredCodec Codec name – e.g. `'opus'`, `'H264'`, `'VP8'`.
  */
-export function preferCodec(sdp: string, kind: 'audio' | 'video', preferredCodec: string): string {
+export const preferCodec = (
+	sdp: string,
+	kind: 'audio' | 'video',
+	preferredCodec: string,
+): string => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -38,7 +42,7 @@ export function preferCodec(sdp: string, kind: 'audio' | 'video', preferredCodec
 	}
 
 	return joinSections(sections);
-}
+};
 
 /**
  * Add a bandwidth limit to the `m=<kind>` section of an SDP string.
@@ -54,11 +58,11 @@ export function preferCodec(sdp: string, kind: 'audio' | 'video', preferredCodec
  * @param kind     `'audio'` or `'video'`, or `'session'` to set the session-level limit.
  * @param maxKbps  Maximum bandwidth in **kilobits per second**.
  */
-export function setBandwidth(
+export const setBandwidth = (
 	sdp: string,
 	kind: 'audio' | 'video' | 'session',
 	maxKbps: number,
-): string {
+): string => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -74,13 +78,12 @@ export function setBandwidth(
 
 		// Insert b= lines after the c= line (or after the m= line if no c=)
 		const insertIdx = findInsertIndex(section.lines);
-		const bLines = [`b=AS:${maxKbps}`, `b=TIAS:${maxKbps * 1000}`];
-		section.lines.splice(insertIdx, 0, ...bLines);
+		section.lines.splice(insertIdx, 0, `b=AS:${maxKbps}`, `b=TIAS:${maxKbps * 1000}`);
 		break;
 	}
 
 	return joinSections(sections);
-}
+};
 
 /**
  * Add simulcast send layers to the first `m=video` section of an SDP offer.
@@ -92,7 +95,7 @@ export function setBandwidth(
  *
  * @param sdp Raw SDP offer string.
  */
-export function addSimulcast(sdp: string): string {
+export const addSimulcast = (sdp: string): string => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -109,7 +112,7 @@ export function addSimulcast(sdp: string): string {
 	}
 
 	return joinSections(sections);
-}
+};
 
 /**
  * Patch `a=fmtp` attributes for the given codec in the `m=<kind>` section.
@@ -122,12 +125,12 @@ export function addSimulcast(sdp: string): string {
  * @param codec  Codec name used to locate the `a=rtpmap` line (e.g. `'opus'`).
  * @param params Key-value map merged into `a=fmtp` (e.g. `{ usedtx: 1, stereo: 1 }`).
  */
-export function patchFmtp(
+export const patchFmtp = (
 	sdp: string,
 	kind: 'audio' | 'video',
 	codec: string,
 	params: Record<string, string | number>,
-): string {
+): string => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -137,13 +140,8 @@ export function patchFmtp(
 		const pts = new Set<string>();
 		for (const line of section.lines) {
 			const match = /^a=rtpmap:(\d+) ([^/]+)/.exec(line);
-			if (
-				match &&
-				match[2]?.toLowerCase() === codec.toLowerCase() &&
-				match[1] !== undefined
-			) {
+			if (match && match[2]?.toLowerCase() === codec.toLowerCase() && match[1] !== undefined)
 				pts.add(match[1]);
-			}
 		}
 
 		if (pts.size === 0) break;
@@ -160,8 +158,7 @@ export function patchFmtp(
 
 			if (fmtpMatch && fmtpMatch[1] !== undefined && pts.has(fmtpMatch[1])) {
 				const pt = fmtpMatch[1];
-				const existing = fmtpMatch[2] ?? '';
-				const merged = mergeFmtp(existing, newParams);
+				const merged = mergeFmtp(fmtpMatch[2] ?? '', newParams);
 				updatedLines.push(`a=fmtp:${pt} ${merged}`);
 				handledPts.add(pt);
 				continue;
@@ -187,13 +184,13 @@ export function patchFmtp(
 	}
 
 	return joinSections(sections);
-}
+};
 
 /**
  * Extract the SSRC value from the first `a=ssrc` line in the `m=<kind>`
  * section. Returns `undefined` when not found.
  */
-export function extractSsrc(sdp: string, kind: 'audio' | 'video'): number | undefined {
+export const extractSsrc = (sdp: string, kind: 'audio' | 'video'): number | undefined => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -206,24 +203,23 @@ export function extractSsrc(sdp: string, kind: 'audio' | 'video'): number | unde
 	}
 
 	return undefined;
-}
+};
 
 /**
  * Strip all `a=extmap` lines referencing a specific URI from an SDP.
  * Useful for removing unsupported RTP header extensions.
  */
-export function removeExtmap(sdp: string, uri: string): string {
-	return sdp
+export const removeExtmap = (sdp: string, uri: string): string =>
+	sdp
 		.split('\r\n')
 		.filter((line) => !(line.startsWith('a=extmap') && line.includes(uri)))
 		.join('\r\n');
-}
 
 /**
  * Return all codec names found in the given `m=<kind>` section.
  * Codec names are derived from `a=rtpmap` lines (e.g. `'opus'`, `'VP8'`).
  */
-export function listCodecs(sdp: string, kind: 'audio' | 'video'): string[] {
+export const listCodecs = (sdp: string, kind: 'audio' | 'video'): string[] => {
 	const sections = splitSections(sdp);
 
 	for (const section of sections) {
@@ -238,18 +234,17 @@ export function listCodecs(sdp: string, kind: 'audio' | 'video'): string[] {
 	}
 
 	return [];
-}
+};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function splitSections(sdp: string): SdpSection[] {
-	const lines = sdp.split('\r\n');
+const splitSections = (sdp: string): SdpSection[] => {
 	const sections: SdpSection[] = [];
 	let current: string[] = [];
 
-	for (const line of lines) {
+	for (const line of sdp.split('\r\n')) {
 		if (line.startsWith('m=') && current.length > 0) {
 			sections.push({ lines: current });
 			current = [];
@@ -260,22 +255,20 @@ function splitSections(sdp: string): SdpSection[] {
 	if (current.length > 0) sections.push({ lines: current });
 
 	return sections;
-}
+};
 
-function joinSections(sections: SdpSection[]): string {
-	return sections.map((s) => s.lines.join('\r\n')).join('\r\n');
-}
+const joinSections = (sections: SdpSection[]): string =>
+	sections.map((s) => s.lines.join('\r\n')).join('\r\n');
 
-function isSectionKind(section: SdpSection, kind: 'audio' | 'video'): boolean {
-	return section.lines[0]?.startsWith(`m=${kind}`) ?? false;
-}
+const isSectionKind = (section: SdpSection, kind: 'audio' | 'video'): boolean =>
+	section.lines[0]?.startsWith(`m=${kind}`) ?? false;
 
 /**
  * Find the correct index to insert `b=` lines within a section.
  * Per RFC 4566 they must follow the `c=` line (or the `m=` line when `c=`
  * is absent).
  */
-function findInsertIndex(lines: string[]): number {
+const findInsertIndex = (lines: string[]): number => {
 	const cIdx = lines.findIndex((l) => l.startsWith('c='));
 	if (cIdx !== -1) return cIdx + 1;
 
@@ -283,14 +276,14 @@ function findInsertIndex(lines: string[]): number {
 	if (mIdx !== -1) return mIdx + 1;
 
 	return 1;
-}
+};
 
 /**
  * Move the preferred codec payload types to the front of the `m=` line and
  * reorder the associated `a=rtpmap` / `a=fmtp` / `a=rtcp-fb` lines to
  * appear first among the attribute block.
  */
-function reorderCodecs(lines: string[], preferredCodec: string): string[] {
+const reorderCodecs = (lines: string[], preferredCodec: string): string[] => {
 	const mLine = lines[0];
 	if (!mLine) return lines;
 
@@ -302,9 +295,8 @@ function reorderCodecs(lines: string[], preferredCodec: string): string[] {
 			match &&
 			match[2]?.toLowerCase() === preferredCodec.toLowerCase() &&
 			match[1] !== undefined
-		) {
+		)
 			preferredPts.add(match[1]);
-		}
 	}
 
 	if (preferredPts.size === 0) return lines;
@@ -313,14 +305,8 @@ function reorderCodecs(lines: string[], preferredCodec: string): string[] {
 	const relatedPts = new Set<string>(preferredPts);
 	for (const line of lines) {
 		const match = /^a=fmtp:(\d+) apt=(\d+)/.exec(line);
-		if (
-			match &&
-			match[2] !== undefined &&
-			preferredPts.has(match[2]) &&
-			match[1] !== undefined
-		) {
+		if (match && match[2] !== undefined && preferredPts.has(match[2]) && match[1] !== undefined)
 			relatedPts.add(match[1]);
-		}
 	}
 
 	// Rewrite the m= line with preferred PTs first
@@ -348,12 +334,12 @@ function reorderCodecs(lines: string[], preferredCodec: string): string[] {
 	});
 
 	return [newMLine, ...preferredAttrs, ...otherAttrs];
-}
+};
 
-function extractPtFromAttr(line: string): string | null {
+const extractPtFromAttr = (line: string): string | null => {
 	const match = /^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/.exec(line);
 	return match?.[1] ?? null;
-}
+};
 
 /**
  * Merge two `a=fmtp` parameter strings.
@@ -361,7 +347,7 @@ function extractPtFromAttr(line: string): string | null {
  *
  * @example mergeFmtp('minptime=10;useinbandfec=1', 'usedtx=1') => 'minptime=10;useinbandfec=1;usedtx=1'
  */
-function mergeFmtp(base: string, incoming: string): string {
+const mergeFmtp = (base: string, incoming: string): string => {
 	const parse = (s: string): Map<string, string> => {
 		const map = new Map<string, string>();
 		for (const pair of s.split(';')) {
@@ -373,4 +359,4 @@ function mergeFmtp(base: string, incoming: string): string {
 
 	const merged = new Map([...parse(base), ...parse(incoming)]);
 	return [...merged.entries()].map(([k, v]) => (v ? `${k}=${v}` : k)).join(';');
-}
+};

@@ -6,3 +6,6 @@ coverage/
 Thumbs.db
 .env
 .env.local
+.mcp.json
+.claude
+.code-review-graph
