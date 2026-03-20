@@ -2,21 +2,21 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  release:
-    name: Release
+  version:
+    name: Version Packages
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-      id-token: write
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,36 +24,72 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
         env:
           HUSKY: 0
 
-      - name: Create Release Pull Request or Publish to npm
+      - name: Create Release Pull Request
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: npm run release
           version: npm run version
           commit: 'chore: version packages'
           title: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HUSKY: 0
-          NPM_CONFIG_PROVENANCE: true
 
-      - name: Setup Node for GitHub Packages
-        if: steps.changesets.outputs.published == 'true'
-        uses: actions/setup-node@v4
+  publish-npm:
+    name: Publish to npm
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com
+          node-version: 22
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Publish to GitHub Packages
-        if: steps.changesets.outputs.published == 'true'
-        run: |
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+        env:
+          HUSKY: 0
+
+      - run: npm publish --provenance --access public
+        env:
+          HUSKY: 0
+
+  publish-gpr:
+    name: Publish to GitHub Packages
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: 'https://npm.pkg.github.com'
+
+      - run: npm ci
+        env:
+          HUSKY: 0
+
+      - run: |
           npm pkg set name="@sefacndmr01/whip-whep-client"
           npm publish --ignore-scripts
           npm pkg set name="whip-whep-client"
