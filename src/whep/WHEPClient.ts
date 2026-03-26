@@ -100,6 +100,7 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 		const { audio = true, video = true } = options;
 		const expectedTracks = (audio ? 1 : 0) + (video ? 1 : 0);
 		let receivedTracks = 0;
+		let streamEmitted = false;
 
 		this.options.logger?.info('Viewing stream', { audio, video });
 
@@ -114,7 +115,10 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 			pc.addEventListener('track', (event: RTCTrackEvent) => {
 				stream.addTrack(event.track);
 				receivedTracks++;
-				if (receivedTracks >= expectedTracks) this.emit('stream', stream);
+				if (!streamEmitted && receivedTracks >= expectedTracks) {
+					streamEmitted = true;
+					this.emit('stream', stream);
+				}
 			});
 
 			const offer = await pc.createOffer();
@@ -309,9 +313,6 @@ export class WHEPClient extends BaseClient<WHEPClientEvents> {
 	}
 
 	private async _doReconnect(): Promise<void> {
-		if (this.pc) {
-			for (const receiver of this.pc.getReceivers()) receiver.track.stop();
-		}
 		await this.teardownForReconnect();
 		this.setState('idle');
 		this._statsSnapshot = null;
