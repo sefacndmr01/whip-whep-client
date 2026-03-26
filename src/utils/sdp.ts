@@ -275,7 +275,7 @@ const findInsertIndex = (lines: string[]): number => {
 	const mIdx = lines.findIndex((l) => l.startsWith('m='));
 	if (mIdx !== -1) return mIdx + 1;
 
-	return 1;
+	return lines.length;
 };
 
 /**
