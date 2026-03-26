@@ -36,8 +36,14 @@ export interface StatsSnapshot {
  * @param rttSeconds Round-trip time in seconds, or `null`.
  */
 export const computeQuality = (lossRate: number, rttSeconds: number | null): ConnectionQuality => {
-	const rttMs = rttSeconds !== null ? rttSeconds * 1000 : 0;
+	if (rttSeconds === null) {
+		if (lossRate < 0.01) return 'excellent';
+		if (lossRate < 0.03) return 'good';
+		if (lossRate < 0.08) return 'fair';
+		return 'poor';
+	}
 
+	const rttMs = rttSeconds * 1000;
 	if (lossRate < 0.01 && rttMs < 50) return 'excellent';
 	if (lossRate < 0.03 && rttMs < 150) return 'good';
 	if (lossRate < 0.08 && rttMs < 300) return 'fair';
