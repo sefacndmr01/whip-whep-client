@@ -256,6 +256,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		let frameWidth = 0;
 		let frameHeight = 0;
 		let roundTripTime: number | null = null;
+		let bestVideoLayerBytes = 0;
 
 		for (const stat of report.values()) {
 			if (stat.type === 'outbound-rtp') {
@@ -269,12 +270,16 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 					audioPacketsSent += s.packetsSent ?? 0;
 				} else if (s.kind === 'video') {
 					// Accumulate across simulcast layers
-					videoBytesSent += s.bytesSent ?? 0;
+					const layerBytes = s.bytesSent ?? 0;
+					videoBytesSent += layerBytes;
 					videoPacketsSent += s.packetsSent ?? 0;
-					// Use stats from the first (highest-bitrate) layer
-					if (frameRate === 0) frameRate = s.framesPerSecond ?? 0;
-					if (frameWidth === 0) frameWidth = s.frameWidth ?? 0;
-					if (frameHeight === 0) frameHeight = s.frameHeight ?? 0;
+					// Use frame stats from the most active (highest-bitrate) layer
+					if (layerBytes > bestVideoLayerBytes) {
+						bestVideoLayerBytes = layerBytes;
+						frameRate = s.framesPerSecond ?? 0;
+						frameWidth = s.frameWidth ?? 0;
+						frameHeight = s.frameHeight ?? 0;
+					}
 				}
 			}
 			if (stat.type === 'remote-inbound-rtp') {
