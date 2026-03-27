@@ -3,6 +3,7 @@ import { WHIPClient } from '../src/whip/WHIPClient.js';
 import { WHIPError, InvalidStateError } from '../src/core/errors.js';
 import type { MockRTCPeerConnection } from './setup.js';
 import { MOCK_SDP_ANSWER, MockRTCRtpSender } from './setup.js';
+import type { StreamStats } from '../src/core/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -431,5 +432,401 @@ describe('WHIPClient', () => {
 		// 50 lost / (100 + 50) = 33% loss → poor
 		expect(stats.quality).toBe('poor');
 		expect(stats.roundTripTime).toBe(0.02);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Endpoint Recovery (RFC 9725 §4.3)
+// ---------------------------------------------------------------------------
+
+describe('WHIPClient – endpoint recovery', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('PATCHes the resource URL when endpointRecovery is enabled and server accepts', async () => {
+		// POST returns 201 with ETag, recovery PATCH returns 200 with new answer
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/1', ETag: '"abc123"' }),
+				})
+				.mockResolvedValue({
+					// PATCH (recovery) → success
+					status: 200,
+					statusText: 'OK',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ ETag: '"def456"' }),
+				}),
+		);
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			endpointRecovery: true,
+			autoReconnect: false,
+		});
+		await client.publish(makeMockStream());
+		await new Promise((r) => setTimeout(r, 10));
+
+		// Manually invoke _doReconnect (internal, accessed for testing)
+		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
+
+		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
+		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		expect(patchCall).toBeDefined();
+
+		// Should NOT have sent a DELETE before the PATCH
+		const deleteBeforePatch = fetchMock.mock.calls
+			.slice(0, fetchMock.mock.calls.indexOf(patchCall!))
+			.find(([, init]) => (init as RequestInit).method === 'DELETE');
+		expect(deleteBeforePatch).toBeUndefined();
+	});
+
+	it('sends If-Match header with ETag during recovery PATCH', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/1', ETag: '"session-etag"' }),
+				})
+				.mockResolvedValue({
+					status: 200,
+					statusText: 'OK',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ ETag: '"new-etag"' }),
+				}),
+		);
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			endpointRecovery: true,
+		});
+		await client.publish(makeMockStream());
+		await new Promise((r) => setTimeout(r, 10));
+		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
+
+		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
+		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		expect(patchCall).toBeDefined();
+		const headers = (patchCall![1] as RequestInit).headers as Headers;
+		expect(headers.get('If-Match')).toBe('"session-etag"');
+	});
+
+	it('falls back to full reconnect when recovery PATCH is rejected (404)', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				// Initial POST
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/1', ETag: '"stale"' }),
+				})
+				// Recovery PATCH fails
+				.mockResolvedValueOnce({
+					status: 404,
+					statusText: 'Not Found',
+					text: () => Promise.resolve('Session expired'),
+					headers: new Headers(),
+				})
+				// Fallback DELETE
+				.mockResolvedValueOnce({ status: 200, headers: new Headers() })
+				// Fallback POST (full reconnect)
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/2' }),
+				}),
+		);
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			endpointRecovery: true,
+		});
+		await client.publish(makeMockStream());
+		await new Promise((r) => setTimeout(r, 10));
+		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
+		await new Promise((r) => setTimeout(r, 10));
+
+		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
+		// After fallback, a second POST should have been made
+		const postCalls = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'POST');
+		expect(postCalls).toHaveLength(2);
+	});
+
+	it('does not attempt recovery when endpointRecovery is false (default)', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				// Initial POST
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/1', ETag: '"abc"' }),
+				})
+				// Fallback DELETE
+				.mockResolvedValueOnce({ status: 200, headers: new Headers() })
+				// Fallback POST (full reconnect)
+				.mockResolvedValueOnce({
+					status: 201,
+					statusText: 'Created',
+					text: () => Promise.resolve(MOCK_SDP_ANSWER),
+					headers: new Headers({ Location: '/whip/resource/2' }),
+				}),
+		);
+
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		await client.publish(makeMockStream());
+		await new Promise((r) => setTimeout(r, 10));
+		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
+		await new Promise((r) => setTimeout(r, 10));
+
+		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
+		// Should never have sent a PATCH for recovery
+		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		expect(patchCall).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Adaptive quality
+// ---------------------------------------------------------------------------
+
+describe('WHIPClient – adaptive quality', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	function mockFetchForAdaptive() {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				status: 201,
+				statusText: 'Created',
+				text: () => Promise.resolve(MOCK_SDP_ANSWER),
+				headers: new Headers({ Location: '/whip/resource/1' }),
+			}),
+		);
+	}
+
+	function makeStatsResult(quality: StreamStats['quality']): StreamStats {
+		return {
+			timestamp: Date.now(),
+			audio: null,
+			video: {
+				bitrate: 1_000_000,
+				packetsLost: 0,
+				packetsLostRate: 0,
+				frameRate: 30,
+				width: 1280,
+				height: 720,
+			},
+			roundTripTime: 0.02,
+			quality,
+		};
+	}
+
+	it('emits qualitychange and reduces bitrate after downgradeThreshold consecutive poor readings', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			video: { maxBitrate: 2_000_000 },
+			adaptiveQuality: { intervalMs: 1000, downgradeThreshold: 2, upgradeThreshold: 4 },
+		});
+		// Start publish without awaiting, then flush the setTimeout(0) that simulates ICE connection
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi
+			.spyOn(client, 'getStats')
+			.mockResolvedValue(makeStatsResult('poor'));
+
+		const onChange = vi.fn();
+		client.on('qualitychange', onChange);
+
+		// First poor reading: threshold not reached
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onChange).not.toHaveBeenCalled();
+
+		// Second poor reading: threshold reached → downgrade
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onChange).toHaveBeenCalledOnce();
+		expect(onChange).toHaveBeenCalledWith('poor');
+
+		statsSpy.mockRestore();
+		await client.stop();
+	});
+
+	it('emits qualitychange and restores bitrate after upgradeThreshold consecutive improved readings', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			video: { maxBitrate: 2_000_000 },
+			adaptiveQuality: { intervalMs: 1000, downgradeThreshold: 2, upgradeThreshold: 3 },
+		});
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi
+			.spyOn(client, 'getStats')
+			.mockResolvedValue(makeStatsResult('poor'));
+
+		const onChange = vi.fn();
+		client.on('qualitychange', onChange);
+
+		// Downgrade first (2 consecutive poor readings)
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(onChange).toHaveBeenLastCalledWith('poor');
+
+		// Now simulate quality recovery
+		statsSpy.mockResolvedValue(makeStatsResult('excellent'));
+
+		// upgradeThreshold = 3 → need 3 excellent readings
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(onChange).toHaveBeenCalledTimes(1); // not yet
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onChange).toHaveBeenCalledTimes(2);
+		expect(onChange).toHaveBeenLastCalledWith('excellent');
+
+		statsSpy.mockRestore();
+		await client.stop();
+	});
+
+	it('applies the correct bitrate fraction to the video sender', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			video: { maxBitrate: 2_000_000 },
+			adaptiveQuality: { intervalMs: 1000, downgradeThreshold: 1, upgradeThreshold: 4 },
+		});
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi
+			.spyOn(client, 'getStats')
+			.mockResolvedValue(makeStatsResult('fair'));
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+		const videoSender = pc
+			.getSenders()
+			.find(
+				(s) => s instanceof MockRTCRtpSender && s.track?.kind === 'video',
+			) as MockRTCRtpSender;
+		const setParamsSpy = vi.spyOn(videoSender, 'setParameters');
+
+		// downgradeThreshold = 1 → triggers on first fair reading
+		await vi.advanceTimersByTimeAsync(1000);
+
+		expect(setParamsSpy).toHaveBeenCalled();
+		const params = setParamsSpy.mock.calls[0]![0] as RTCRtpSendParameters;
+		// fair → 50% of 2_000_000 = 1_000_000
+		expect(params.encodings[0]!.maxBitrate).toBe(1_000_000);
+
+		statsSpy.mockRestore();
+		await client.stop();
+	});
+
+	it('does not start adaptive quality polling when adaptiveQuality is false', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({ endpoint: 'https://example.com/whip' });
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi.spyOn(client, 'getStats');
+		const onChange = vi.fn();
+		client.on('qualitychange', onChange);
+
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		expect(statsSpy).not.toHaveBeenCalled();
+		expect(onChange).not.toHaveBeenCalled();
+
+		await client.stop();
+	});
+
+	it('stops adaptive quality polling after stop()', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			adaptiveQuality: { intervalMs: 1000 },
+		});
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi.spyOn(client, 'getStats').mockResolvedValue(makeStatsResult('poor'));
+		await client.stop();
+
+		const callsBefore = statsSpy.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(5000);
+		// No new calls after stop()
+		expect(statsSpy.mock.calls.length).toBe(callsBefore);
+	});
+
+	it('respects minVideoBitrate floor', async () => {
+		mockFetchForAdaptive();
+
+		const client = new WHIPClient({
+			endpoint: 'https://example.com/whip',
+			video: { maxBitrate: 200_000 },
+			adaptiveQuality: {
+				intervalMs: 1000,
+				downgradeThreshold: 1,
+				minVideoBitrate: 160_000,
+			},
+		});
+		const pp = client.publish(makeMockStream());
+		await vi.advanceTimersByTimeAsync(0);
+		await pp;
+
+		const statsSpy = vi
+			.spyOn(client, 'getStats')
+			.mockResolvedValue(makeStatsResult('poor'));
+
+		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
+		const videoSender = pc
+			.getSenders()
+			.find(
+				(s) => s instanceof MockRTCRtpSender && s.track?.kind === 'video',
+			) as MockRTCRtpSender;
+		const setParamsSpy = vi.spyOn(videoSender, 'setParameters');
+
+		await vi.advanceTimersByTimeAsync(1000);
+
+		const params = setParamsSpy.mock.calls[0]![0] as RTCRtpSendParameters;
+		// poor → 25% of 200_000 = 50_000, but floor is 160_000
+		expect(params.encodings[0]!.maxBitrate).toBe(160_000);
+
+		statsSpy.mockRestore();
+		await client.stop();
 	});
 });
