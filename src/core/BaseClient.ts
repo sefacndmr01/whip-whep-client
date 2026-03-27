@@ -117,6 +117,14 @@ export abstract class BaseClient<
 	protected pc: RTCPeerConnection | null = null;
 	protected resourceUrl: string | null = null;
 
+	/**
+	 * The `ETag` value from the most recent successful WHIP/WHEP POST (or
+	 * ICE-restart PATCH) response. Used by endpoint recovery to send an
+	 * `If-Match` header per RFC 9725 §4.3. `null` until the first successful
+	 * exchange and after the resource is deleted.
+	 */
+	protected etag: string | null = null;
+
 	/** Set to `true` once the connection reaches `'connected'` for the first time. */
 	protected _wasConnected = false;
 
@@ -355,6 +363,9 @@ export abstract class BaseClient<
 			? resolveUrl(location, this.options.endpoint)
 			: this.options.endpoint;
 
+		const etag = response.headers.get('ETag');
+		if (etag) this.etag = etag;
+
 		this.options.logger?.debug('SDP exchange complete', { resourceUrl });
 
 		return { sdpAnswer, resourceUrl };
@@ -393,6 +404,7 @@ export abstract class BaseClient<
 
 		const url = this.resourceUrl;
 		this.resourceUrl = null;
+		this.etag = null;
 
 		this.options.logger?.debug('DELETE resource', { url });
 
@@ -420,11 +432,86 @@ export abstract class BaseClient<
 	}
 
 	/**
+	 * Close the peer connection **without** deleting the server resource or
+	 * clearing the resource URL / ETag. Used by the endpoint-recovery flow so
+	 * that the session can be resumed via a PATCH rather than a full
+	 * DELETE + POST cycle.
+	 */
+	protected teardownPcOnly(): void {
+		this.onBeforeTeardown();
+		this.pc?.close();
+		this.pc = null;
+	}
+
+	/**
 	 * Override in subclasses to clean up ICE trickle handlers before
 	 * `teardownForReconnect` closes the peer connection.
 	 */
 	protected onBeforeTeardown(): void {
 		// Overridden by WHIPClient and WHEPClient
+	}
+
+	/**
+	 * PATCH a new SDP offer to the existing WHIP resource URL to perform an
+	 * ICE restart per RFC 9725 §4.3.
+	 *
+	 * Sends `Content-Type: application/sdp` with an `If-Match` header
+	 * containing the session ETag (when available). Expects a `200 OK`
+	 * response with a new SDP answer; any other status causes a
+	 * `WhipWhepError` to be thrown so the caller can fall back to a full
+	 * reconnect.
+	 *
+	 * On success, the ETag is updated from the response headers.
+	 *
+	 * @throws {TimeoutError}  When the request exceeds `options.timeout`.
+	 * @throws {WhipWhepError} On network error or non-200 response.
+	 */
+	protected async patchSdpForIceRestart(sdpOffer: string): Promise<string> {
+		if (!this.resourceUrl) throw new WhipWhepError('No active resource URL for ICE restart');
+
+		this.options.logger?.debug('PATCH SDP for ICE restart', { resourceUrl: this.resourceUrl });
+
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), this.options.timeout);
+
+		const extraHeaders: Record<string, string> = { 'Content-Type': 'application/sdp' };
+		if (this.etag) extraHeaders['If-Match'] = this.etag;
+
+		let response: Response;
+		try {
+			response = await fetch(this.resourceUrl, {
+				method: 'PATCH',
+				headers: await this.buildHeaders(extraHeaders),
+				body: sdpOffer,
+				signal: controller.signal,
+			});
+		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError')
+				throw new TimeoutError(this.options.timeout);
+			throw new WhipWhepError('Network error during ICE restart PATCH', { cause: err });
+		} finally {
+			clearTimeout(timer);
+		}
+
+		if (response.status !== 200) {
+			const body = await response.text().catch(() => '');
+			const detail = body ? `: ${body}` : '';
+			this.options.logger?.warn('ICE restart PATCH rejected', { status: response.status });
+			throw new WhipWhepError(
+				`ICE restart rejected with status ${response.status}${detail}`,
+				{ status: response.status },
+			);
+		}
+
+		const sdpAnswer = await response.text();
+		if (!sdpAnswer) throw new WhipWhepError('Server returned empty SDP answer for ICE restart');
+
+		const newEtag = response.headers.get('ETag');
+		if (newEtag) this.etag = newEtag;
+
+		this.options.logger?.debug('ICE restart complete');
+
+		return sdpAnswer;
 	}
 
 	/**

@@ -52,6 +52,47 @@ export interface AutoReconnectOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Adaptive quality
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for automatic encoding quality adaptation based on
+ * connection statistics.
+ *
+ * Pass `adaptiveQuality: true` to `WHIPClientOptions` to use all defaults,
+ * or provide an object to fine-tune the adaptation policy.
+ *
+ * When enabled, `WHIPClient` polls `getStats()` on an interval and scales
+ * the video sender's `maxBitrate` according to the measured
+ * `ConnectionQuality`. Bitrate is restored gradually when quality improves.
+ */
+export interface AdaptiveQualityOptions {
+	/**
+	 * How often to sample connection stats in milliseconds.
+	 * Defaults to `5000` (5 seconds).
+	 */
+	intervalMs?: number;
+
+	/**
+	 * Number of consecutive degraded quality readings required before
+	 * reducing the video bitrate. Defaults to `2`.
+	 */
+	downgradeThreshold?: number;
+
+	/**
+	 * Number of consecutive improved quality readings required before
+	 * increasing the video bitrate back toward the target. Defaults to `4`.
+	 */
+	upgradeThreshold?: number;
+
+	/**
+	 * Minimum video bitrate floor in **bits per second**. The encoder will
+	 * not be throttled below this value. Defaults to `150_000` (150 kbps).
+	 */
+	minVideoBitrate?: number;
+}
+
+// ---------------------------------------------------------------------------
 // Stats
 // ---------------------------------------------------------------------------
 
@@ -397,6 +438,38 @@ export interface WHIPClientOptions extends BaseClientOptions {
 	 * @example 4_000  // 4 Mbps
 	 */
 	maxBandwidth?: number;
+
+	/**
+	 * Attempt to recover the existing WHIP session via an HTTP PATCH when
+	 * the `RTCPeerConnection` fails, before falling back to a full
+	 * DELETE + POST reconnect.
+	 *
+	 * Per RFC 9725 §4.3, the client sends a new SDP offer to the resource
+	 * URL with an `If-Match` header containing the session `ETag`. If the
+	 * server still holds the session it responds with `200 OK` and a new SDP
+	 * answer; otherwise the library falls back to a full reconnect
+	 * automatically.
+	 *
+	 * Defaults to `false`.
+	 */
+	endpointRecovery?: boolean;
+
+	/**
+	 * Automatically adapt the video encoding bitrate based on measured
+	 * connection quality.
+	 *
+	 * - `true` – use default adaptation policy.
+	 * - `AdaptiveQualityOptions` – customise polling interval, thresholds,
+	 *   and minimum bitrate.
+	 *
+	 * When quality degrades, the video `maxBitrate` is scaled down
+	 * (`poor` → 25 %, `fair` → 50 %, `good` → 75 % of target).
+	 * It is restored gradually once quality improves. Emits a
+	 * `'qualitychange'` event on each level transition.
+	 *
+	 * Defaults to `false`.
+	 */
+	adaptiveQuality?: boolean | AdaptiveQualityOptions;
 }
 
 /**
@@ -528,5 +601,17 @@ export interface WHEPClientEvents extends BaseClientEvents {
 	stream: (stream: MediaStream) => void;
 }
 
-/** Events emitted by the WHIP publisher client. */
-export type WHIPClientEvents = BaseClientEvents;
+/**
+ * Events emitted by the WHIP publisher client.
+ */
+export interface WHIPClientEvents extends BaseClientEvents {
+	/**
+	 * Fired when adaptive quality changes the effective encoding level.
+	 *
+	 * Only emitted when `adaptiveQuality` is enabled. The `quality` argument
+	 * reflects the measured `ConnectionQuality` that triggered the change.
+	 *
+	 * @param quality  The new quality level driving the bitrate target.
+	 */
+	qualitychange: (quality: ConnectionQuality) => void;
+}

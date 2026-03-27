@@ -20,6 +20,7 @@ export type {
 	WHEPClientEvents,
 	Logger,
 	AutoReconnectOptions,
+	AdaptiveQualityOptions,
 	ConnectionQuality,
 	AudioStats,
 	VideoStats,
