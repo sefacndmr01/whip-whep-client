@@ -477,7 +477,9 @@ describe('WHIPClient – endpoint recovery', () => {
 		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
 
 		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
-		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		const patchCall = fetchMock.mock.calls.find(
+			([, init]) => (init as RequestInit).method === 'PATCH',
+		);
 		expect(patchCall).toBeDefined();
 
 		// Should NOT have sent a DELETE before the PATCH
@@ -515,7 +517,9 @@ describe('WHIPClient – endpoint recovery', () => {
 		await (client as unknown as { _doReconnect(): Promise<void> })._doReconnect();
 
 		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
-		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		const patchCall = fetchMock.mock.calls.find(
+			([, init]) => (init as RequestInit).method === 'PATCH',
+		);
 		expect(patchCall).toBeDefined();
 		const headers = (patchCall![1] as RequestInit).headers as Headers;
 		expect(headers.get('If-Match')).toBe('"session-etag"');
@@ -562,7 +566,9 @@ describe('WHIPClient – endpoint recovery', () => {
 
 		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
 		// After fallback, a second POST should have been made
-		const postCalls = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'POST');
+		const postCalls = fetchMock.mock.calls.filter(
+			([, init]) => (init as RequestInit).method === 'POST',
+		);
 		expect(postCalls).toHaveLength(2);
 	});
 
@@ -597,7 +603,9 @@ describe('WHIPClient – endpoint recovery', () => {
 
 		const fetchMock = vi.mocked(fetch) as ReturnType<typeof vi.fn>;
 		// Should never have sent a PATCH for recovery
-		const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === 'PATCH');
+		const patchCall = fetchMock.mock.calls.find(
+			([, init]) => (init as RequestInit).method === 'PATCH',
+		);
 		expect(patchCall).toBeUndefined();
 	});
 });
@@ -658,9 +666,7 @@ describe('WHIPClient – adaptive quality', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await pp;
 
-		const statsSpy = vi
-			.spyOn(client, 'getStats')
-			.mockResolvedValue(makeStatsResult('poor'));
+		const statsSpy = vi.spyOn(client, 'getStats').mockResolvedValue(makeStatsResult('poor'));
 
 		const onChange = vi.fn();
 		client.on('qualitychange', onChange);
@@ -690,9 +696,7 @@ describe('WHIPClient – adaptive quality', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await pp;
 
-		const statsSpy = vi
-			.spyOn(client, 'getStats')
-			.mockResolvedValue(makeStatsResult('poor'));
+		const statsSpy = vi.spyOn(client, 'getStats').mockResolvedValue(makeStatsResult('poor'));
 
 		const onChange = vi.fn();
 		client.on('qualitychange', onChange);
@@ -728,9 +732,7 @@ describe('WHIPClient – adaptive quality', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await pp;
 
-		const statsSpy = vi
-			.spyOn(client, 'getStats')
-			.mockResolvedValue(makeStatsResult('fair'));
+		const statsSpy = vi.spyOn(client, 'getStats').mockResolvedValue(makeStatsResult('fair'));
 
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
 		const videoSender = pc
@@ -808,9 +810,7 @@ describe('WHIPClient – adaptive quality', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await pp;
 
-		const statsSpy = vi
-			.spyOn(client, 'getStats')
-			.mockResolvedValue(makeStatsResult('poor'));
+		const statsSpy = vi.spyOn(client, 'getStats').mockResolvedValue(makeStatsResult('poor'));
 
 		const pc = (client as unknown as { pc: MockRTCPeerConnection }).pc!;
 		const videoSender = pc
