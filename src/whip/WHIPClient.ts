@@ -6,6 +6,8 @@ import type {
 	StreamStats,
 	AudioStats,
 	VideoStats,
+	AdaptiveQualityOptions,
+	ConnectionQuality,
 } from '../core/types.js';
 import { WHIPError, InvalidStateError } from '../core/errors.js';
 import { preferCodec, addSimulcast, setBandwidth, patchFmtp } from '../utils/sdp.js';
@@ -17,6 +19,29 @@ import {
 	applyLayerToEncoding,
 	buildOpusFmtp,
 } from './encodings.js';
+
+// ---------------------------------------------------------------------------
+// Adaptive quality constants
+// ---------------------------------------------------------------------------
+
+/** Numeric rank used to compare quality levels (higher = better). */
+const QUALITY_RANK: Record<ConnectionQuality, number> = {
+	poor: 0,
+	fair: 1,
+	good: 2,
+	excellent: 3,
+};
+
+/**
+ * Fraction of the target bitrate applied at each quality level.
+ * Applied to the single-layer video sender's `maxBitrate`.
+ */
+const QUALITY_FACTORS: Record<ConnectionQuality, number> = {
+	poor: 0.25,
+	fair: 0.5,
+	good: 0.75,
+	excellent: 1.0,
+};
 
 // ---------------------------------------------------------------------------
 // WHIPClient
@@ -69,6 +94,13 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 	private _lastStream: MediaStream | null = null;
 	private _lastPublishOptions: PublishOptions = {};
 	private _statsSnapshot: StatsSnapshot | null = null;
+
+	// Adaptive quality state
+	private _adaptiveTimer: ReturnType<typeof setInterval> | null = null;
+	private _targetBitrate: number | null = null;
+	private _currentAdaptiveQuality: ConnectionQuality = 'excellent';
+	private _degradedCount = 0;
+	private _improvedCount = 0;
 
 	constructor(options: WHIPClientOptions) {
 		super(options);
@@ -144,6 +176,8 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 				mode: 'end-of-candidates',
 				onCandidates: (candidates) => this.patchIceCandidates(candidates),
 			});
+
+			this.startAdaptiveQuality();
 		} catch (err) {
 			this.setState('failed');
 			await this.deleteResource();
@@ -166,6 +200,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 
 		this.cleanupIce?.();
 		this.cleanupIce = null;
+		this.stopAdaptiveQuality();
 
 		await this.deleteResource();
 		this.close();
@@ -469,12 +504,195 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 	protected override onBeforeTeardown(): void {
 		this.cleanupIce?.();
 		this.cleanupIce = null;
+		this.stopAdaptiveQuality();
 	}
 
 	private async _doReconnect(): Promise<void> {
+		const useRecovery = this.whipOptions.endpointRecovery ?? false;
+
+		if (useRecovery && this.resourceUrl && this.etag) {
+			try {
+				this.options.logger?.info('Attempting endpoint recovery via PATCH (RFC 9725 §4.3)');
+				await this._tryEndpointRecovery();
+				this._statsSnapshot = null;
+				return;
+			} catch (err) {
+				this.options.logger?.warn(
+					'Endpoint recovery failed, falling back to full reconnect',
+					{ error: err instanceof Error ? err.message : String(err) },
+				);
+				// Close any partial new PC and delete the server resource
+				this.pc?.close();
+				this.pc = null;
+				await this.deleteResource();
+			}
+		}
+
 		await this.teardownForReconnect();
 		this.setState('idle');
 		this._statsSnapshot = null;
 		await this.publish(this._lastStream!, this._lastPublishOptions);
+	}
+
+	/**
+	 * Attempt to recover the WHIP session by sending a new SDP offer to the
+	 * existing resource URL via HTTP PATCH (RFC 9725 §4.3).
+	 *
+	 * Creates a fresh `RTCPeerConnection`, generates a new offer, and PATCHes
+	 * the resource with `If-Match: <etag>`. If the server responds with
+	 * `200 OK`, the new answer is applied and ICE proceeds normally.
+	 *
+	 * The server resource is **not** deleted before the attempt, preserving
+	 * the session for potential recovery.
+	 *
+	 * @throws When the PATCH is rejected or the connection fails to establish.
+	 */
+	private async _tryEndpointRecovery(): Promise<void> {
+		this.teardownPcOnly(); // close old PC, keep resourceUrl + etag
+		this.setState('connecting');
+
+		const pc = this.createPeerConnection();
+		const { audio = true, video = true } = this._lastPublishOptions;
+		const useSimulcast =
+			this._lastPublishOptions.simulcast ?? this.whipOptions.simulcast ?? false;
+
+		if (audio) this.addAudioTransceiver(pc, this._lastStream!);
+		if (video) this.addVideoTransceiver(pc, this._lastStream!, useSimulcast);
+
+		const offer = await pc.createOffer();
+		const sdp = this.mutateSdpOffer(offer.sdp ?? '', useSimulcast);
+		await pc.setLocalDescription({ type: 'offer', sdp });
+
+		const sdpAnswer = await this.patchSdpForIceRestart(sdp).catch((err) => {
+			throw err instanceof WHIPError
+				? err
+				: new WHIPError('ICE restart PATCH failed', { cause: err });
+		});
+
+		await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
+		await this.applyEncodingConstraints(pc);
+		await this.waitForIceConnection(pc);
+
+		this.cleanupIce = setupIceTrickle(pc, {
+			mode: 'end-of-candidates',
+			onCandidates: (candidates) => this.patchIceCandidates(candidates),
+		});
+
+		this.startAdaptiveQuality();
+	}
+
+	// -------------------------------------------------------------------------
+	// Adaptive quality
+	// -------------------------------------------------------------------------
+
+	private startAdaptiveQuality(): void {
+		const opts = this.resolveAdaptiveQuality();
+		if (!opts) return;
+
+		this._targetBitrate = this.getTargetBitrate();
+		this._currentAdaptiveQuality = 'excellent';
+		this._degradedCount = 0;
+		this._improvedCount = 0;
+
+		this._adaptiveTimer = setInterval(() => {
+			void this._adaptStep(opts);
+		}, opts.intervalMs);
+	}
+
+	private stopAdaptiveQuality(): void {
+		if (this._adaptiveTimer !== null) {
+			clearInterval(this._adaptiveTimer);
+			this._adaptiveTimer = null;
+		}
+	}
+
+	private async _adaptStep(opts: Required<AdaptiveQualityOptions>): Promise<void> {
+		if (!this.pc) return;
+
+		let stats: StreamStats;
+		try {
+			stats = await this.getStats();
+		} catch {
+			return;
+		}
+
+		const measured = stats.quality;
+		const current = this._currentAdaptiveQuality;
+
+		if (QUALITY_RANK[measured] < QUALITY_RANK[current]) {
+			this._degradedCount++;
+			this._improvedCount = 0;
+			if (this._degradedCount >= opts.downgradeThreshold) {
+				this._degradedCount = 0;
+				this._currentAdaptiveQuality = measured;
+				await this._applyQualityBitrate(measured, opts);
+				this.options.logger?.info('Adaptive quality: downgraded', { quality: measured });
+				this.emit('qualitychange', measured);
+			}
+		} else if (QUALITY_RANK[measured] > QUALITY_RANK[current]) {
+			this._improvedCount++;
+			this._degradedCount = 0;
+			if (this._improvedCount >= opts.upgradeThreshold) {
+				this._improvedCount = 0;
+				this._currentAdaptiveQuality = measured;
+				await this._applyQualityBitrate(measured, opts);
+				this.options.logger?.info('Adaptive quality: upgraded', { quality: measured });
+				this.emit('qualitychange', measured);
+			}
+		} else {
+			this._degradedCount = 0;
+			this._improvedCount = 0;
+		}
+	}
+
+	/**
+	 * Apply the bitrate target for the given quality level to the active
+	 * video sender via `RTCRtpSender.setParameters()`.
+	 */
+	private async _applyQualityBitrate(
+		quality: ConnectionQuality,
+		opts: Required<AdaptiveQualityOptions>,
+	): Promise<void> {
+		if (!this.pc || !this._targetBitrate) return;
+
+		const factor = QUALITY_FACTORS[quality];
+		const targetBitrate = Math.max(
+			opts.minVideoBitrate,
+			Math.round(this._targetBitrate * factor),
+		);
+
+		for (const sender of this.pc.getSenders()) {
+			if (sender.track?.kind !== 'video') continue;
+			const params = sender.getParameters();
+			if (!params.encodings?.length) continue;
+			for (const enc of params.encodings) enc.maxBitrate = targetBitrate;
+			await sender.setParameters(params).catch(() => {});
+			this.options.logger?.debug('Adaptive quality: video bitrate adjusted', {
+				quality,
+				targetBitrate,
+			});
+			break; // Only the first video sender
+		}
+	}
+
+	/** Determine the baseline video bitrate for adaptive quality scaling. */
+	private getTargetBitrate(): number {
+		const videoOpts = this.whipOptions.video;
+		if (videoOpts && !Array.isArray(videoOpts) && videoOpts.maxBitrate) {
+			return videoOpts.maxBitrate;
+		}
+		return 2_500_000; // 2.5 Mbps default
+	}
+
+	private resolveAdaptiveQuality(): Required<AdaptiveQualityOptions> | null {
+		const raw = this.whipOptions.adaptiveQuality;
+		if (!raw) return null;
+		const opts = typeof raw === 'boolean' ? {} : raw;
+		return {
+			intervalMs: opts.intervalMs ?? 5_000,
+			downgradeThreshold: opts.downgradeThreshold ?? 2,
+			upgradeThreshold: opts.upgradeThreshold ?? 4,
+			minVideoBitrate: opts.minVideoBitrate ?? 150_000,
+		};
 	}
 }
