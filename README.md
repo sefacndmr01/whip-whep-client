@@ -35,6 +35,8 @@ Implementing WHIP or WHEP by hand is entirely possible — the protocol is just 
 | Error context                  | Inspect raw `Response.status`, wrap `DOMException` for timeouts                 | Typed error classes with HTTP status       |
 | Cleanup                        | DELETE resource URL, close `RTCPeerConnection`, stop tracks                     | `client.stop()`                            |
 | Auto-reconnect                 | Track attempt count, implement exponential backoff, re-run full signalling flow  | `autoReconnect: true` or `reconnect()`     |
+| Session recovery               | PATCH resource URL with `If-Match` ETag header, fall back gracefully on failure | `endpointRecovery: true`                   |
+| Adaptive bitrate               | Poll stats, compute quality score, call `setParameters()` with scaled bitrate   | `adaptiveQuality: true`                    |
 | Track replacement              | Find the correct `RTCRtpSender`, call `replaceTrack`, update your stream refs   | `replaceTrack('video', newTrack)`          |
 | Stream statistics              | Iterate `RTCStatsReport`, compute deltas, derive quality from loss + RTT        | `getStats()` returns typed `StreamStats`   |
 | ICE hang detection             | Set up a manual timer, tear down the peer connection on expiry                  | `iceConnectionTimeout` option              |
@@ -151,6 +153,8 @@ new WHIPClient(options: WHIPClientOptions)
 | `audio`                  | `AudioEncodingOptions`                        | —                | Advanced audio encoding parameters                       |
 | `video`                  | `VideoLayerOptions \| VideoLayerOptions[]`    | —                | Advanced video encoding parameters                       |
 | `maxBandwidth`           | `number`                                      | —                | Session bandwidth limit in **kbps** (`b=AS` in SDP)      |
+| `endpointRecovery`       | `boolean`                                     | `false`          | Try PATCH-based session recovery before full reconnect (RFC 9725 §4.3) |
+| `adaptiveQuality`        | `boolean \| AdaptiveQualityOptions`           | —                | Auto-scale video bitrate based on measured connection quality |
 | `peerConnectionConfig`   | `RTCConfiguration`                            | —                | Extra options merged into `RTCPeerConnection` config      |
 
 
@@ -228,6 +232,7 @@ Returns a normalised snapshot of the current session statistics. Bitrate values 
 | `failed`                   | `error: Error`                  | Connection irrecoverably failed                    |
 | `reconnecting`             | `attempt: number, delayMs: number` | Auto-reconnect attempt starting                 |
 | `reconnected`              | —                               | Auto-reconnect successfully restored the session   |
+| `qualitychange`            | `quality: ConnectionQuality`    | Adaptive quality changed the effective bitrate level (requires `adaptiveQuality`) |
 | `connectionstatechange`    | `state: RTCPeerConnectionState` | Raw connection state changes                       |
 | `iceconnectionstatechange` | `state: RTCIceConnectionState`  | ICE connection state changes                       |
 | `icegatheringstatechange`  | `state: RTCIceGatheringState`   | ICE gathering state changes                        |
@@ -544,6 +549,90 @@ client.on('failed', async () => {
 
 Auto-reconnect only fires when the connection was previously `'connected'`. It does not retry signalling errors (e.g. a `401` from the server).
 
+### Endpoint Recovery
+
+When a WHIP session drops, the default reconnect flow sends HTTP DELETE to release the server resource and then re-opens a brand-new session with a fresh HTTP POST. If the server is still holding the session (e.g. a brief network hiccup), the full teardown is unnecessary overhead.
+
+Enable `endpointRecovery: true` to attempt a lighter-weight recovery first, per [RFC 9725 §4.3](https://www.rfc-editor.org/rfc/rfc9725#section-4.3):
+
+1. The library stores the `ETag` from each successful WHIP POST response.
+2. On reconnect, it sends a PATCH to the resource URL with the new SDP offer and an `If-Match: <etag>` header — **without deleting the resource first**.
+3. If the server still holds the session it responds with `200 OK` and a new SDP answer; the session resumes without re-creating a server-side resource.
+4. If the server rejects the PATCH (e.g. `404 Not Found` when the session has expired), the library falls back to the normal DELETE + POST reconnect automatically.
+
+```ts
+const client = new WHIPClient({
+    endpoint: 'https://ingest.example.com/whip/live',
+    token: 'my-token',
+    autoReconnect: true,
+    endpointRecovery: true,   // try PATCH recovery before falling back to full reconnect
+});
+
+client.on('reconnecting', (attempt) => console.log(`Attempt ${attempt}`));
+client.on('reconnected', () => console.log('Session restored'));
+
+await client.publish(stream);
+```
+
+`endpointRecovery` only applies to `WHIPClient`. It requires `autoReconnect` or a manual `reconnect()` call to be useful. Enabling it has no effect unless the server supports the PATCH-based recovery flow.
+
+### Adaptive Quality
+
+When network conditions deteriorate, the browser's built-in congestion control reduces bitrate, but it cannot prevent the connection quality indicator from flipping to `'poor'` before any reduction takes effect. `adaptiveQuality` lets you act on quality measurements proactively by scaling the video `maxBitrate` in sync with the measured `ConnectionQuality`.
+
+```ts
+const client = new WHIPClient({
+    endpoint: 'https://ingest.example.com/whip/live',
+    video: { maxBitrate: 2_500_000 },   // target bitrate at 'excellent' quality
+    adaptiveQuality: true,              // use defaults (see table below)
+});
+
+client.on('qualitychange', (quality) => {
+    console.log('Bitrate scaled for:', quality);
+    // 'poor'      → 25 % of target  (625 kbps)
+    // 'fair'      → 50 % of target  (1 250 kbps)
+    // 'good'      → 75 % of target  (1 875 kbps)
+    // 'excellent' → 100 % of target (2 500 kbps)
+});
+
+await client.publish(stream);
+```
+
+Fine-tune the adaptation policy:
+
+```ts
+const client = new WHIPClient({
+    endpoint: '...',
+    video: { maxBitrate: 3_000_000 },
+    adaptiveQuality: {
+        intervalMs: 3_000,          // how often to sample stats (default: 5 000 ms)
+        downgradeThreshold: 2,      // consecutive degraded readings before scaling down (default: 2)
+        upgradeThreshold: 4,        // consecutive improved readings before scaling up (default: 4)
+        minVideoBitrate: 200_000,   // never throttle below this value (default: 150 000 bps)
+    },
+});
+```
+
+**`AdaptiveQualityOptions`**
+
+| Option                | Type     | Default     | Description                                                            |
+| --------------------- | -------- | ----------- | ---------------------------------------------------------------------- |
+| `intervalMs`          | `number` | `5000`      | Stats polling interval in milliseconds                                 |
+| `downgradeThreshold`  | `number` | `2`         | Consecutive readings worse than current level needed to scale down     |
+| `upgradeThreshold`    | `number` | `4`         | Consecutive readings better than current level needed to scale up      |
+| `minVideoBitrate`     | `number` | `150000`    | Minimum video bitrate floor in **bps**; bitrate is never set below this |
+
+**Bitrate scaling table**
+
+| Measured quality | Target factor | Example (target 2.5 Mbps) |
+| ---------------- | ------------- | ------------------------- |
+| `excellent`      | 100 %         | 2 500 kbps                |
+| `good`           | 75 %          | 1 875 kbps                |
+| `fair`           | 50 %          | 1 250 kbps                |
+| `poor`           | 25 %          | 625 kbps                  |
+
+The target bitrate is taken from `video.maxBitrate` when set, or defaults to 2.5 Mbps. Adaptive quality does not modify simulcast layer activity; it adjusts the `maxBitrate` on the single-layer video sender.
+
 ### Connection Quality and Stats
 
 Poll `getStats()` on an interval to monitor stream health:
@@ -716,10 +805,12 @@ import type {
     AudioEncodingOptions,
     VideoLayerOptions,
     AutoReconnectOptions,
+    AdaptiveQualityOptions,
     Logger,
     StreamStats,
     ConnectionQuality,
     BaseClientEvents,
+    WHIPClientEvents,
     WHEPClientEvents,
     ClientState,
 } from 'whip-whep-client';
