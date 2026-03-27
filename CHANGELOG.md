@@ -1,5 +1,11 @@
 # whip-whep-client
 
+## 1.0.2
+
+### Patch Changes
+
+- 3e65844: github tag configuration
+
 ## 1.0.1
 
 ### Patch Changes
