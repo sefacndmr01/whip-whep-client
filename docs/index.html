@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>whip-whep-client — TypeScript WHIP/WHEP client for WebRTC</title>
+  <meta name="description" content="A modern, TypeScript-first client library for the WHIP and WHEP WebRTC streaming protocols." />
+  <style>
+    /* ── Tokens ───────────────────────────────────────────────────── */
+    :root {
+      --bg:          #000000;
+      --sidebar-bg:  #000000;
+      --surface:     #0a0a0a;
+      --border:      rgba(255,255,255,.1);
+      --border-hard: rgba(255,255,255,.18);
+      --text:        #ffffff;
+      --muted:       rgba(255,255,255,.6);
+      --faint:       rgba(255,255,255,.35);
+      --accent:      #a78bfa;
+      --accent-soft: rgba(167,139,250,.12);
+      --green:       #50e3c2;
+      --yellow:      #f5a623;
+      --red:         #ee4444;
+      --code-bg:     #0a0a0a;
+      --code-text:   rgba(255,255,255,.87);
+      --kw:          #ff79c6;
+      --str:         #a8ff78;
+      --fn:          #79b8ff;
+      --typ:         #ffeea6;
+      --num:         #f97583;
+      --cmt:         rgba(255,255,255,.32);
+      --sidebar-w:   272px;
+      --content-max: 760px;
+      --radius:      6px;
+      --font:        Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono:        "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+    }
+
+    /* ── Reset ────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font); font-size: 15px; line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+    h1, h2, h3, h4 { font-weight: 600; line-height: 1.3; }
+    p { color: var(--muted); }
+    ul, ol { padding-left: 1.4em; color: var(--muted); }
+    li { margin-bottom: .3em; }
+    strong { color: var(--text); font-weight: 600; }
+
+    /* ── Top bar ──────────────────────────────────────────────────── */
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 64px;
+      background: rgba(0,0,0,.72);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      display: flex; align-items: center;
+    }
+
+    .topbar-inner {
+      width: 100%; max-width: calc(var(--sidebar-w) + var(--content-max) + 80px);
+      margin: 0 auto; padding: 0 1.5rem;
+      display: flex; align-items: center;
+    }
+
+    /* ── Brand ── */
+    .topbar-brand {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; flex-shrink: 0;
+    }
+    .topbar-brand:hover { text-decoration: none; }
+
+    .topbar-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; flex-shrink: 0;
+      color: #fff;
+    }
+
+    .topbar-wordmark {
+      font-size: .875rem; font-weight: 600;
+      color: #fff; letter-spacing: -.025em;
+      white-space: nowrap;
+    }
+
+    .topbar-vdivider {
+      width: 1px; height: 20px;
+      background: rgba(255,255,255,.14);
+      margin: 0 14px; flex-shrink: 0;
+    }
+
+    .topbar-section {
+      font-size: .8125rem; font-weight: 500;
+      color: rgba(255,255,255,.48);
+      white-space: nowrap;
+    }
+
+    /* ── Right ── */
+    .topbar-right {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 2px;
+    }
+
+    .topbar-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 10px; border-radius: 6px;
+      font-size: .8125rem; font-weight: 500;
+      color: rgba(255,255,255,.58);
+      transition: color .15s ease, background .15s ease;
+      text-decoration: none; white-space: nowrap;
+    }
+    .topbar-link:hover {
+      color: #fff; background: rgba(255,255,255,.07);
+      text-decoration: none;
+    }
+    .topbar-link svg { flex-shrink: 0; }
+
+    .topbar-badge {
+      display: inline-flex; align-items: center;
+      font-size: .7rem; font-weight: 500;
+      color: rgba(255,255,255,.42);
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 6px; padding: 3px 9px;
+      letter-spacing: .01em; white-space: nowrap;
+      margin-left: 8px;
+    }
+
+    /* ── Mobile ── */
+    .menu-btn {
+      display: none; background: none; border: none; cursor: pointer;
+      color: rgba(255,255,255,.5); padding: 6px; margin-left: 8px;
+      border-radius: 6px; transition: color .15s, background .15s;
+    }
+    .menu-btn:hover { color: #fff; background: rgba(255,255,255,.07); }
+    .menu-btn svg { display: block; }
+
+    /* ── Layout ───────────────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      max-width: calc(var(--sidebar-w) + var(--content-max) + 80px);
+      margin: 0 auto;
+      padding-top: 64px;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: 64px;
+      height: calc(100vh - 64px);
+      overflow-y: auto;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .sidebar-nav { padding: 1.5rem 0 3rem; }
+
+    .nav-group { margin-bottom: .25rem; }
+
+    .nav-group-title {
+      display: block; padding: .35rem 1.5rem;
+      font-size: .7rem; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--faint); margin-top: 1.25rem;
+      user-select: none;
+    }
+    .nav-group:first-child .nav-group-title { margin-top: .5rem; }
+
+    .nav-item {
+      display: block; padding: .3rem 1.5rem;
+      font-size: .8125rem; color: var(--muted);
+      transition: color .1s, background .1s;
+      border-left: 2px solid transparent;
+    }
+    .nav-item:hover { color: var(--text); text-decoration: none; background: rgba(255,255,255,.05); }
+    .nav-item.active {
+      color: var(--accent); border-left-color: var(--accent);
+      background: rgba(167,139,250,.08);
+    }
+
+    /* ── Main content ─────────────────────────────────────────────── */
+    .content {
+      flex: 1; min-width: 0;
+      padding: 3rem 2.5rem 6rem;
+      max-width: var(--content-max);
+    }
+
+    /* ── Sections ─────────────────────────────────────────────────── */
+    .doc-section { margin-bottom: 4rem; }
+
+    .doc-section h2 {
+      font-size: 1.6rem; color: var(--text);
+      padding-bottom: .75rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+      scroll-margin-top: 88px;
+    }
+
+    .doc-section h3 {
+      font-size: 1.1rem; color: var(--text);
+      margin: 2rem 0 .75rem;
+      scroll-margin-top: 88px;
+    }
+
+    .doc-section h4 {
+      font-size: .9rem; color: var(--text);
+      margin: 1.5rem 0 .5rem;
+      font-weight: 600;
+    }
+
+    .doc-section p + p { margin-top: .75rem; }
+    .doc-section p + pre { margin-top: .75rem; }
+    .doc-section h3 + p { margin-top: .25rem; }
+
+    /* ── Code ─────────────────────────────────────────────────────── */
+    code {
+      font-family: var(--mono);
+      font-size: .78em;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: .1em .38em;
+      color: var(--code-text);
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.5rem;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: .8rem;
+      line-height: 1.7;
+      color: var(--code-text);
+      margin: .75rem 0;
+      position: relative;
+    }
+
+    pre code { background: none; border: none; padding: 0; font-size: inherit; }
+    .kw  { color: var(--kw);  }
+    .str { color: var(--str); }
+    .fn  { color: var(--fn);  }
+    .typ { color: var(--typ); }
+    .num { color: var(--num); }
+    .cmt { color: var(--cmt); font-style: italic; }
+    .op  { color: rgba(255,255,255,.55); }
+
+    /* ── Tables ───────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; margin: 1rem 0; border-radius: var(--radius); border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+
+    thead tr { background: rgba(255,255,255,.04); }
+
+    th {
+      text-align: left; padding: .65rem 1rem;
+      color: var(--faint); font-weight: 600;
+      font-size: .7rem; letter-spacing: .05em; text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.03); }
+    td:first-child code { color: var(--accent); }
+    td p { font-size: .8rem; margin-top: .2rem; }
+
+    /* ── Badges ───────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block; font-size: .65rem; font-weight: 700;
+      padding: 1px 6px; border-radius: 20px; vertical-align: middle;
+      letter-spacing: .03em; white-space: nowrap;
+    }
+    .badge-new   { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.25); }
+    .badge-req   { background: rgba(248,113,113,.12); color: var(--red); border: 1px solid rgba(248,113,113,.25); }
+    .badge-def   { background: rgba(255,255,255,.06); color: var(--faint); border: 1px solid var(--border); font-weight: 500; }
+
+    /* ── Info / tip boxes ─────────────────────────────────────────── */
+    .callout {
+      border-left: 3px solid; border-radius: 0 var(--radius) var(--radius) 0;
+      padding: .9rem 1.1rem; margin: 1rem 0;
+      font-size: .85rem;
+    }
+    .callout p { font-size: .85rem; }
+    .callout-info  { border-color: var(--accent); background: var(--accent-soft); }
+    .callout-tip   { border-color: var(--green);  background: rgba(74,222,128,.08); }
+    .callout-warn  { border-color: var(--yellow); background: rgba(251,191,36,.08); }
+    .callout-title { font-weight: 700; color: var(--text); margin-bottom: .3rem; font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+
+    /* ── Install box ──────────────────────────────────────────────── */
+    .install-row {
+      display: flex; align-items: center; gap: .75rem;
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: .7rem 1.1rem;
+      font-family: var(--mono); font-size: .85rem;
+      width: fit-content; margin: 1rem 0;
+    }
+    .install-row .prompt { color: var(--faint); user-select: none; }
+    .copy-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 4px; padding: 2px 9px; cursor: pointer;
+      font-size: .7rem; color: var(--muted);
+      transition: color .15s, border-color .15s;
+      font-family: var(--font);
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ── Method signature ─────────────────────────────────────────── */
+    .method-sig {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: .7rem 1.1rem;
+      font-family: var(--mono); font-size: .8rem;
+      color: var(--code-text); margin: .75rem 0 .5rem;
+    }
+    .method-sig .fn  { color: var(--fn); }
+    .method-sig .typ { color: var(--typ); }
+    .method-sig .kw  { color: var(--kw); }
+    .method-sig .op  { color: rgba(255,255,255,.4); }
+
+    /* ── Quality table ────────────────────────────────────────────── */
+    .quality-row-excellent td:first-child { color: var(--green); }
+    .quality-row-good td:first-child      { color: #60a5fa; }
+    .quality-row-fair td:first-child      { color: var(--yellow); }
+    .quality-row-poor td:first-child      { color: var(--red); }
+
+    /* ── Hero ─────────────────────────────────────────────────────── */
+    .hero { padding-bottom: 3rem; }
+    .hero-title { font-size: 2.4rem; font-weight: 700; letter-spacing: -.03em; color: var(--text); margin-bottom: .75rem; line-height: 1.2; }
+    .hero-title em { font-style: normal; color: var(--accent); }
+    .hero-desc { font-size: 1.1rem; color: var(--muted); max-width: 540px; margin-bottom: 1.5rem; }
+    .hero-actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .5rem 1.1rem; border-radius: var(--radius);
+      font-size: .8125rem; font-weight: 600; cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; text-decoration: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid var(--border); }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      :root { --sidebar-w: 0px; }
+      .sidebar { display: none; position: fixed; left: 0; top: 64px; z-index: 150; width: 272px; height: calc(100vh - 64px); }
+      .sidebar.open { display: block; }
+      .content { padding: 2rem 1.25rem 5rem; }
+      .menu-btn { display: flex; }
+      .topbar-badge { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Topbar ──────────────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-inner">
+
+    <!-- Brand -->
+    <a class="topbar-brand" href="#introduction">
+      <span class="topbar-icon">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 3.5C3 2.94772 3.44772 2.5 4 2.5H6C6.55228 2.5 7 2.94772 7 3.5V8.5C7 9.05228 6.55228 9.5 6 9.5H4C3.44772 9.5 3 9.05228 3 8.5V3.5Z" fill="currentColor" opacity=".9"/>
+          <path d="M9 6.5C9 5.94772 9.44772 5.5 10 5.5H14C14.5523 5.5 15 5.94772 15 6.5V14.5C15 15.0523 14.5523 15.5 14 15.5H10C9.44772 15.5 9 15.0523 9 14.5V6.5Z" fill="currentColor" opacity=".9"/>
+          <path d="M3 12C3 11.4477 3.44772 11 4 11H6C6.55228 11 7 11.4477 7 12V14.5C7 15.0523 6.55228 15.5 6 15.5H4C3.44772 15.5 3 15.0523 3 14.5V12Z" fill="currentColor" opacity=".55"/>
+        </svg>
+      </span>
+      <span class="topbar-wordmark">whip-whep-client</span>
+    </a>
+
+    <div class="topbar-vdivider"></div>
+    <span class="topbar-section">Docs</span>
+
+    <!-- Right -->
+    <div class="topbar-right">
+      <a class="topbar-link" href="https://github.com/sefacndmr01/whip-whep-client" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+        </svg>
+        GitHub
+      </a>
+      <a class="topbar-link" href="https://www.npmjs.com/package/whip-whep-client" target="_blank" rel="noopener" aria-label="npm">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M1.763 0C.786 0 0 .786 0 1.763v20.474C0 23.214.786 24 1.763 24h20.474c.977 0 1.763-.786 1.763-1.763V1.763C24 .786 23.214 0 22.237 0zM5.13 5.323l13.837.019-.009 13.836h-3.464l.01-10.382h-3.456l-.01 10.382H5.13z"/>
+        </svg>
+        npm
+      </a>
+      <span class="topbar-badge">v1.1.0</span>
+
+      <!-- Mobile hamburger -->
+      <button class="menu-btn" onclick="toggleSidebar()" aria-label="Toggle menu">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/>
+        </svg>
+      </button>
+    </div>
+
+  </div>
+</header>
+
+<!-- ── Layout ─────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <nav class="sidebar-nav">
+
+      <div class="nav-group">
+        <span class="nav-group-title">Getting Started</span>
+        <a class="nav-item" href="#introduction">Introduction</a>
+        <a class="nav-item" href="#installation">Installation</a>
+        <a class="nav-item" href="#quick-start">Quick Start</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-title">WHIPClient</span>
+        <a class="nav-item" href="#whip-options">Constructor Options</a>
+        <a class="nav-item" href="#whip-publish">publish()</a>
+        <a class="nav-item" href="#whip-stop">stop()</a>
+        <a class="nav-item" href="#whip-reconnect">reconnect()</a>
+        <a class="nav-item" href="#whip-replace-track">replaceTrack()</a>
+        <a class="nav-item" href="#whip-get-stats">getStats()</a>
+        <a class="nav-item" href="#whip-events">Events</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-title">WHEPClient</span>
+        <a class="nav-item" href="#whep-options">Constructor Options</a>
+        <a class="nav-item" href="#whep-view">view()</a>
+        <a class="nav-item" href="#whep-stop">stop()</a>
+        <a class="nav-item" href="#whep-reconnect">reconnect()</a>
+        <a class="nav-item" href="#whep-get-stats">getStats()</a>
+        <a class="nav-item" href="#whep-events">Events</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-title">Advanced</span>
+        <a class="nav-item" href="#authentication">Authentication</a>
+        <a class="nav-item" href="#simulcast">Simulcast</a>
+        <a class="nav-item" href="#endpoint-recovery">Endpoint Recovery</a>
+        <a class="nav-item" href="#adaptive-quality">Adaptive Quality</a>
+        <a class="nav-item" href="#auto-reconnect">Auto-Reconnect</a>
+        <a class="nav-item" href="#connection-stats">Connection Stats</a>
+        <a class="nav-item" href="#sdp-utilities">SDP Utilities</a>
+        <a class="nav-item" href="#ice-utilities">ICE Utilities</a>
+        <a class="nav-item" href="#media-helpers">Media Helpers</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-title">Server Presets</span>
+        <a class="nav-item" href="#preset-livekit">LiveKit</a>
+        <a class="nav-item" href="#preset-ovenmedia">OvenMedia Engine</a>
+        <a class="nav-item" href="#preset-cloudflare">Cloudflare Stream</a>
+        <a class="nav-item" href="#preset-antmedia">Ant Media Server</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-title">Reference</span>
+        <a class="nav-item" href="#error-handling">Error Handling</a>
+        <a class="nav-item" href="#typescript">TypeScript</a>
+      </div>
+
+    </nav>
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────────── -->
+  <main class="content">
+
+    <!-- Introduction -->
+    <div class="doc-section hero" id="introduction">
+      <h1 class="hero-title">WebRTC streaming<br>without the <em>boilerplate</em></h1>
+      <p class="hero-desc">
+        A modern, TypeScript-first client library for the
+        <strong>WHIP</strong> and <strong>WHEP</strong> WebRTC streaming protocols.
+        Publish or subscribe to live streams in a few lines of code.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#installation">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/sefacndmr01/whip-whep-client" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+    </div>
+
+    <div class="doc-section" id="installation">
+      <h2>Installation</h2>
+      <p>Install the package from npm:</p>
+      <div class="install-row">
+        <span class="prompt">$</span>
+        <span id="install-cmd">npm install whip-whep-client</span>
+        <button class="copy-btn" onclick="copyInstall(this)">copy</button>
+      </div>
+      <p>The package ships three output formats to cover every environment:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>File</th><th>Use case</th></tr></thead>
+          <tbody>
+            <tr><td>ESM</td><td><code>dist/index.mjs</code></td><td>Bundlers — Vite, webpack, Rollup</td></tr>
+            <tr><td>CommonJS</td><td><code>dist/index.cjs</code></td><td>Node.js tooling</td></tr>
+            <tr><td>IIFE</td><td><code>dist/index.global.js</code></td><td><code>&lt;script&gt;</code> tag, CDN</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>CDN (no build step)</h3>
+<pre><code><span class="op">&lt;</span>script src<span class="op">=</span><span class="str">"https://unpkg.com/whip-whep-client/dist/index.global.js"</span><span class="op">&gt;&lt;/</span>script<span class="op">&gt;</span>
+<span class="op">&lt;</span>script<span class="op">&gt;</span>
+  <span class="kw">const</span> { WHIPClient, WHEPClient } <span class="op">=</span> WhipWhepClient<span class="op">;</span>
+<span class="op">&lt;/</span>script<span class="op">&gt;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="quick-start">
+      <h2>Quick Start</h2>
+
+      <h3>Publish a stream (WHIP)</h3>
+<pre><code><span class="kw">import</span> { WHIPClient } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    token<span class="op">:</span>    <span class="str">'my-secret-token'</span><span class="op">,</span>
+})<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'connected'</span><span class="op">,</span>    () <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Publishing'</span>))<span class="op">;</span>
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'disconnected'</span><span class="op">,</span> () <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Paused'</span>))<span class="op">;</span>
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'failed'</span><span class="op">,</span>       (err) <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">error</span>(<span class="str">'Error:'</span><span class="op">,</span> err))<span class="op">;</span>
+
+<span class="kw">const</span> stream <span class="op">=</span> <span class="kw">await</span> navigator<span class="op">.</span>mediaDevices<span class="op">.</span><span class="fn">getUserMedia</span>({ video<span class="op">:</span> <span class="kw">true</span><span class="op">,</span> audio<span class="op">:</span> <span class="kw">true</span> })<span class="op">;</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span>
+
+<span class="cmt">// When done:</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">stop</span>()<span class="op">;</span></code></pre>
+
+      <h3>Subscribe to a stream (WHEP)</h3>
+<pre><code><span class="kw">import</span> { WHEPClient } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://cdn.example.com/whep/stream/abc123'</span><span class="op">,</span>
+    token<span class="op">:</span>    <span class="str">'viewer-token'</span><span class="op">,</span>
+})<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'stream'</span><span class="op">,</span> (stream) <span class="op">=&gt;</span> {
+    document<span class="op">.</span><span class="fn">querySelector</span>(<span class="str">'video'</span>)<span class="op">.</span>srcObject <span class="op">=</span> stream<span class="op">;</span>
+})<span class="op">;</span>
+
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">view</span>()<span class="op">;</span>
+
+<span class="cmt">// When done:</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">stop</span>()<span class="op">;</span></code></pre>
+    </div>
+
+    <!-- WHIPClient -->
+    <div class="doc-section" id="whip-options">
+      <h2>WHIPClient — Constructor Options</h2>
+      <p>All options for <code>new WHIPClient(options: WHIPClientOptions)</code>.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>endpoint</code></td><td>string</td><td><span class="badge badge-req">required</span></td><td>WHIP endpoint URL.</td></tr>
+            <tr><td><code>token</code></td><td>string</td><td>—</td><td>Sent as <code>Authorization: Bearer &lt;token&gt;</code>.</td></tr>
+            <tr><td><code>headers</code></td><td>Record&lt;string, string&gt;</td><td>—</td><td>Static custom headers appended to every HTTP request.</td></tr>
+            <tr><td><code>getHeaders</code></td><td>() =&gt; Record | Promise</td><td>—</td><td>Async function resolved before each request. Overrides <code>headers</code>.</td></tr>
+            <tr><td><code>iceServers</code></td><td>RTCIceServer[]</td><td>browser defaults</td><td>STUN / TURN server list.</td></tr>
+            <tr><td><code>iceTransportPolicy</code></td><td>'all' | 'relay'</td><td>'all'</td><td>Set to <code>'relay'</code> to force TURN-only connectivity.</td></tr>
+            <tr><td><code>iceCandidatePoolSize</code></td><td>number</td><td>0</td><td>Number of ICE candidates to pre-gather before the offer is sent.</td></tr>
+            <tr><td><code>timeout</code></td><td>number</td><td>15000</td><td>Maximum ms to wait for the SDP exchange to complete.</td></tr>
+            <tr><td><code>iceConnectionTimeout</code></td><td>number</td><td>—</td><td>Maximum ms to wait for ICE to reach <code>'connected'</code> after SDP exchange.</td></tr>
+            <tr><td><code>autoReconnect</code></td><td>boolean | AutoReconnectOptions</td><td>—</td><td>Automatically retry on mid-session failure. See <a href="#auto-reconnect">Auto-Reconnect</a>.</td></tr>
+            <tr><td><code>endpointRecovery</code></td><td>boolean</td><td>false</td><td>Attempt PATCH-based session recovery before full reconnect. <span class="badge badge-new">NEW</span></td></tr>
+            <tr><td><code>adaptiveQuality</code></td><td>boolean | AdaptiveQualityOptions</td><td>—</td><td>Auto-scale video bitrate based on connection quality. <span class="badge badge-new">NEW</span></td></tr>
+            <tr><td><code>simulcast</code></td><td>boolean</td><td>false</td><td>Enable simulcast with three quality layers (high / mid / low).</td></tr>
+            <tr><td><code>audioCodec</code></td><td>string</td><td>—</td><td>Preferred audio codec name, e.g. <code>'opus'</code>.</td></tr>
+            <tr><td><code>videoCodec</code></td><td>string</td><td>—</td><td>Preferred video codec name, e.g. <code>'h264'</code>, <code>'vp8'</code>, <code>'av1'</code>.</td></tr>
+            <tr><td><code>audio</code></td><td>AudioEncodingOptions</td><td>—</td><td>Advanced Opus parameters. See <a href="#whip-options">AudioEncodingOptions</a> below.</td></tr>
+            <tr><td><code>video</code></td><td>VideoLayerOptions | VideoLayerOptions[]</td><td>—</td><td>Single-layer or per-simulcast-layer encoding parameters.</td></tr>
+            <tr><td><code>maxBandwidth</code></td><td>number</td><td>—</td><td>Session bandwidth limit in kbps. Written as <code>b=AS</code> in the SDP offer.</td></tr>
+            <tr><td><code>peerConnectionConfig</code></td><td>RTCConfiguration</td><td>—</td><td>Extra fields merged into the <code>RTCPeerConnection</code> config.</td></tr>
+            <tr><td><code>logger</code></td><td>Logger</td><td>—</td><td>Any object with <code>debug/info/warn/error</code> methods (e.g. <code>console</code>).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>AudioEncodingOptions</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>maxBitrate</code></td><td>number</td><td>—</td><td>Maximum audio bitrate in bps. Applied via <code>setParameters()</code>.</td></tr>
+            <tr><td><code>dtx</code></td><td>boolean</td><td>false</td><td>Discontinuous Transmission — reduces bitrate during silence.</td></tr>
+            <tr><td><code>stereo</code></td><td>boolean</td><td>false</td><td>Force stereo encoding.</td></tr>
+            <tr><td><code>fec</code></td><td>boolean</td><td>true</td><td>In-band Forward Error Correction for Opus.</td></tr>
+            <tr><td><code>comfortNoise</code></td><td>boolean</td><td>false</td><td>Generate comfort noise during silence.</td></tr>
+            <tr><td><code>contentHint</code></td><td>'speech' | 'music' | ''</td><td>—</td><td>Encoder content hint passed to the browser.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>VideoLayerOptions</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>rid</code></td><td>string</td><td>RID label for simulcast layers, e.g. <code>'high'</code>, <code>'mid'</code>, <code>'low'</code>.</td></tr>
+            <tr><td><code>maxBitrate</code></td><td>number</td><td>Maximum encoding bitrate in bps.</td></tr>
+            <tr><td><code>maxFramerate</code></td><td>number</td><td>Maximum frames per second.</td></tr>
+            <tr><td><code>scaleResolutionDownBy</code></td><td>number</td><td>Downscale factor. <code>1</code> = full, <code>2</code> = half, <code>4</code> = quarter.</td></tr>
+            <tr><td><code>active</code></td><td>boolean</td><td>Whether this encoding layer is active.</td></tr>
+            <tr><td><code>degradationPreference</code></td><td>RTCDegradationPreference</td><td>How to trade off quality when bandwidth is constrained.</td></tr>
+            <tr><td><code>contentHint</code></td><td>'motion' | 'detail' | 'text' | ''</td><td>Encoder hint for the content type.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whip-publish">
+      <h2>publish()</h2>
+      <div class="method-sig"><span class="fn">publish</span><span class="op">(</span>stream<span class="op">:</span> <span class="typ">MediaStream</span><span class="op">,</span> options<span class="op">?:</span> <span class="typ">PublishOptions</span><span class="op">):</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Starts publishing. Creates the <code>RTCPeerConnection</code>, adds media tracks, performs the SDP offer/answer exchange with the server, and waits for ICE to connect.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>audio</code></td><td>boolean</td><td>true</td><td>Include the audio track from the stream.</td></tr>
+            <tr><td><code>video</code></td><td>boolean</td><td>true</td><td>Include the video track from the stream.</td></tr>
+            <tr><td><code>simulcast</code></td><td>boolean</td><td>from constructor</td><td>Override simulcast for this specific call.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout-warn">
+        <div class="callout-title">State</div>
+        <p>Throws <code>InvalidStateError</code> when called on a client that is not in the <code>'idle'</code> state. Create a new instance or call <code>reconnect()</code> instead.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whip-stop">
+      <h2>stop()</h2>
+      <div class="method-sig"><span class="fn">stop</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Sends HTTP DELETE to the resource URL, closes the <code>RTCPeerConnection</code>, and removes all event listeners. The client transitions to <code>'closed'</code> state. Safe to call multiple times.</p>
+    </div>
+
+    <div class="doc-section" id="whip-reconnect">
+      <h2>reconnect()</h2>
+      <div class="method-sig"><span class="fn">reconnect</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Tears down the current session and re-runs <code>publish()</code> with the stream from the last call. Useful for manually handling a <code>'failed'</code> event. When <code>endpointRecovery</code> is enabled, a PATCH-based recovery is attempted first.</p>
+      <div class="callout callout-warn">
+        <div class="callout-title">Prerequisite</div>
+        <p>Throws <code>InvalidStateError</code> if <code>publish()</code> has not been called at least once.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whip-replace-track">
+      <h2>replaceTrack()</h2>
+      <div class="method-sig"><span class="fn">replaceTrack</span><span class="op">(</span>kind<span class="op">:</span> <span class="str">'audio'</span> <span class="op">|</span> <span class="str">'video'</span><span class="op">,</span> track<span class="op">:</span> <span class="typ">MediaStreamTrack</span><span class="op">):</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Replaces the active sender track without renegotiation. The swap takes effect immediately via <code>RTCRtpSender.replaceTrack()</code>. The stored stream used by <code>reconnect()</code> is updated automatically.</p>
+<pre><code><span class="cmt">// Switch to screen share mid-stream</span>
+<span class="kw">const</span> screen <span class="op">=</span> <span class="kw">await</span> navigator<span class="op">.</span>mediaDevices<span class="op">.</span><span class="fn">getDisplayMedia</span>({ video<span class="op">:</span> <span class="kw">true</span> })<span class="op">;</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">replaceTrack</span>(<span class="str">'video'</span><span class="op">,</span> screen<span class="op">.</span><span class="fn">getVideoTracks</span>()[<span class="num">0</span>])<span class="op">;</span>
+
+<span class="cmt">// Switch back to camera</span>
+<span class="kw">const</span> cam <span class="op">=</span> <span class="kw">await</span> navigator<span class="op">.</span>mediaDevices<span class="op">.</span><span class="fn">getUserMedia</span>({ video<span class="op">:</span> <span class="kw">true</span> })<span class="op">;</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">replaceTrack</span>(<span class="str">'video'</span><span class="op">,</span> cam<span class="op">.</span><span class="fn">getVideoTracks</span>()[<span class="num">0</span>])<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="whip-get-stats">
+      <h2>getStats()</h2>
+      <div class="method-sig"><span class="fn">getStats</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="typ">StreamStats</span><span class="op">&gt;</span></div>
+      <p>Returns a normalised snapshot of the current session. Bitrate values are computed as a delta since the previous call — call periodically (e.g. every 2 s) for meaningful readings. See <a href="#connection-stats">Connection Stats</a> for the full type reference.</p>
+    </div>
+
+    <div class="doc-section" id="whip-events">
+      <h2>WHIPClient — Events</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Event</th><th>Arguments</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>connected</code></td><td>—</td><td>ICE + DTLS fully established, media is flowing.</td></tr>
+            <tr><td><code>disconnected</code></td><td>—</td><td>Connection temporarily lost. May recover without action.</td></tr>
+            <tr><td><code>failed</code></td><td>error: Error</td><td>Connection has irrecoverably failed.</td></tr>
+            <tr><td><code>reconnecting</code></td><td>attempt: number, delayMs: number</td><td>Auto-reconnect attempt is starting.</td></tr>
+            <tr><td><code>reconnected</code></td><td>—</td><td>Auto-reconnect successfully restored the session.</td></tr>
+            <tr><td><code>qualitychange</code></td><td>quality: ConnectionQuality</td><td>Adaptive quality changed the effective bitrate level. <span class="badge badge-new">NEW</span></td></tr>
+            <tr><td><code>connectionstatechange</code></td><td>state: RTCPeerConnectionState</td><td>Raw <code>RTCPeerConnection</code> state change.</td></tr>
+            <tr><td><code>iceconnectionstatechange</code></td><td>state: RTCIceConnectionState</td><td>ICE connection state change.</td></tr>
+            <tr><td><code>icegatheringstatechange</code></td><td>state: RTCIceGatheringState</td><td>ICE gathering state change.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- WHEPClient -->
+    <div class="doc-section" id="whep-options">
+      <h2>WHEPClient — Constructor Options</h2>
+      <p>Shares all base options with <code>WHIPClient</code> (<code>endpoint</code>, <code>token</code>, <code>headers</code>, <code>getHeaders</code>, <code>iceServers</code>, <code>iceTransportPolicy</code>, <code>iceCandidatePoolSize</code>, <code>timeout</code>, <code>iceConnectionTimeout</code>, <code>autoReconnect</code>, <code>logger</code>, <code>peerConnectionConfig</code>), plus:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>audioCodec</code></td><td>string</td><td>—</td><td>Preferred inbound audio codec.</td></tr>
+            <tr><td><code>videoCodec</code></td><td>string</td><td>—</td><td>Preferred inbound video codec.</td></tr>
+            <tr><td><code>maxBandwidth</code></td><td>number</td><td>—</td><td>Bandwidth hint to the server in kbps (<code>b=AS</code> in the SDP offer).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whep-view">
+      <h2>view()</h2>
+      <div class="method-sig"><span class="fn">view</span><span class="op">(</span>options<span class="op">?:</span> <span class="typ">ViewOptions</span><span class="op">):</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="typ">MediaStream</span><span class="op">&gt;</span></div>
+      <p>Opens the WHEP subscription. Returns a <code>MediaStream</code> populated as remote tracks arrive. The <code>'stream'</code> event fires once all expected tracks are received.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>audio</code></td><td>boolean</td><td>true</td><td>Add an audio receive transceiver.</td></tr>
+            <tr><td><code>video</code></td><td>boolean</td><td>true</td><td>Add a video receive transceiver.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whep-stop">
+      <h2>stop() — WHEPClient</h2>
+      <div class="method-sig"><span class="fn">stop</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Stops all remote tracks, sends HTTP DELETE to the resource URL, and closes the peer connection. Safe to call multiple times.</p>
+    </div>
+
+    <div class="doc-section" id="whep-reconnect">
+      <h2>reconnect() — WHEPClient</h2>
+      <div class="method-sig"><span class="fn">reconnect</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="kw">void</span><span class="op">&gt;</span></div>
+      <p>Tears down the current session and re-runs <code>view()</code> with the options from the last call. The new stream is delivered via the <code>'stream'</code> event.</p>
+    </div>
+
+    <div class="doc-section" id="whep-get-stats">
+      <h2>getStats() — WHEPClient</h2>
+      <div class="method-sig"><span class="fn">getStats</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="typ">StreamStats</span><span class="op">&gt;</span></div>
+      <p>Same interface as <code>WHIPClient.getStats()</code>. Reads from <code>inbound-rtp</code> entries (receiver stats) and the active ICE candidate pair for RTT.</p>
+    </div>
+
+    <div class="doc-section" id="whep-events">
+      <h2>WHEPClient — Events</h2>
+      <p>All WHIPClient base events plus:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Event</th><th>Arguments</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>stream</code></td><td>stream: MediaStream</td><td>Remote stream is ready to attach to a <code>&lt;video&gt;</code> element.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Advanced -->
+    <div class="doc-section" id="authentication">
+      <h2>Authentication</h2>
+      <p>Three mechanisms are available, merged in priority order (later entries override earlier ones):</p>
+      <ol>
+        <li>Built-in defaults — <code>Content-Type</code>, <code>Authorization</code> from <code>token</code></li>
+        <li>Static <code>headers</code></li>
+        <li>Dynamic <code>getHeaders()</code> return value</li>
+      </ol>
+
+      <h3>Bearer token</h3>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    token<span class="op">:</span>    <span class="str">'my-secret'</span><span class="op">,</span>  <span class="cmt">// → Authorization: Bearer my-secret</span>
+})<span class="op">;</span></code></pre>
+
+      <h3>Custom static headers</h3>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    headers<span class="op">:</span> {
+        <span class="str">'Authorization'</span><span class="op">:</span> <span class="str">'Token abc123'</span><span class="op">,</span>
+        <span class="str">'X-API-Key'</span><span class="op">:</span>     <span class="str">'my-key'</span><span class="op">,</span>
+    }<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+
+      <h3>Dynamic headers (token refresh, HMAC)</h3>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    <span class="fn">getHeaders</span><span class="op">:</span> <span class="kw">async</span> () <span class="op">=&gt;</span> ({
+        <span class="str">'Authorization'</span><span class="op">:</span> <span class="op">`</span>Bearer <span class="op">${</span><span class="kw">await</span> tokenStore<span class="op">.</span><span class="fn">getValidToken</span>()<span class="op">}`</span><span class="op">,</span>
+    })<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="simulcast">
+      <h2>Simulcast</h2>
+      <p>Set <code>simulcast: true</code> to publish three quality layers simultaneously. An SFU can then forward the appropriate layer to each viewer based on their bandwidth.</p>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span>  <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    simulcast<span class="op">:</span> <span class="kw">true</span><span class="op">,</span>
+})<span class="op">;</span></code></pre>
+
+      <h3>Custom layer configuration</h3>
+      <p>Override the default layers by passing an array to <code>video</code>. Layers should be ordered high to low quality and each must have a unique <code>rid</code>.</p>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span>  <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    simulcast<span class="op">:</span> <span class="kw">true</span><span class="op">,</span>
+    video<span class="op">:</span> [
+        { rid<span class="op">:</span> <span class="str">'high'</span><span class="op">,</span> maxBitrate<span class="op">:</span> <span class="num">2_500_000</span><span class="op">,</span> scaleResolutionDownBy<span class="op">:</span> <span class="num">1</span> }<span class="op">,</span>
+        { rid<span class="op">:</span> <span class="str">'mid'</span><span class="op">,</span>  maxBitrate<span class="op">:</span> <span class="num">1_000_000</span><span class="op">,</span> scaleResolutionDownBy<span class="op">:</span> <span class="num">2</span> }<span class="op">,</span>
+        { rid<span class="op">:</span> <span class="str">'low'</span><span class="op">,</span>  maxBitrate<span class="op">:</span>   <span class="num">300_000</span><span class="op">,</span> scaleResolutionDownBy<span class="op">:</span> <span class="num">4</span> }<span class="op">,</span>
+    ]<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+      <div class="callout callout-info">
+        <div class="callout-title">Server support</div>
+        <p>Simulcast requires SFU-side support. Single-origin servers (e.g. Cloudflare Stream) do not forward simulcast layers to WHEP viewers.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="endpoint-recovery">
+      <h2>Endpoint Recovery <span class="badge badge-new">NEW in v1.1</span></h2>
+      <p>When a connection drops, the default reconnect flow sends HTTP DELETE to release the server resource and then re-opens a brand-new session with a fresh POST. If the server is still holding the session — a brief network hiccup — this teardown is unnecessary overhead.</p>
+      <p>Enable <code>endpointRecovery: true</code> to attempt a lighter-weight recovery first, per <a href="https://www.rfc-editor.org/rfc/rfc9725#section-4.3" target="_blank" rel="noopener">RFC 9725 §4.3</a>:</p>
+      <ol>
+        <li>The library stores the <code>ETag</code> from each successful WHIP POST response.</li>
+        <li>On reconnect, it sends a PATCH to the resource URL with a new SDP offer and an <code>If-Match: &lt;etag&gt;</code> header — <strong>without deleting the resource first</strong>.</li>
+        <li>If the server still holds the session it responds with <code>200 OK</code> and a new SDP answer.</li>
+        <li>If the server rejects the PATCH (e.g. <code>404 Not Found</code> when the session has expired), the library automatically falls back to DELETE + POST.</li>
+      </ol>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span>         <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    token<span class="op">:</span>            <span class="str">'my-token'</span><span class="op">,</span>
+    autoReconnect<span class="op">:</span>    <span class="kw">true</span><span class="op">,</span>
+    endpointRecovery<span class="op">:</span> <span class="kw">true</span><span class="op">,</span>
+})<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'reconnecting'</span><span class="op">,</span> (attempt) <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">log</span>(<span class="op">`</span>Attempt <span class="op">${</span>attempt<span class="op">}`</span>))<span class="op">;</span>
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'reconnected'</span><span class="op">,</span>  () <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Session restored'</span>))<span class="op">;</span>
+
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span></code></pre>
+      <div class="callout callout-tip">
+        <div class="callout-title">Tip</div>
+        <p><code>endpointRecovery</code> is only useful when combined with <code>autoReconnect</code> or a manual <code>reconnect()</code> call. It only applies to <code>WHIPClient</code>.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="adaptive-quality">
+      <h2>Adaptive Quality <span class="badge badge-new">NEW in v1.1</span></h2>
+      <p>Enable <code>adaptiveQuality</code> to have the library automatically scale the video encoder bitrate in response to the measured <code>ConnectionQuality</code>. When quality degrades the bitrate is reduced; once conditions improve the bitrate is gradually restored.</p>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span>        <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    video<span class="op">:</span>           { maxBitrate<span class="op">:</span> <span class="num">2_500_000</span> }<span class="op">,</span>  <span class="cmt">// target at 'excellent'</span>
+    adaptiveQuality<span class="op">:</span> <span class="kw">true</span><span class="op">,</span>
+})<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'qualitychange'</span><span class="op">,</span> (quality) <span class="op">=&gt;</span> {
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Bitrate adjusted for:'</span><span class="op">,</span> quality)<span class="op">;</span>
+})<span class="op">;</span>
+
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span></code></pre>
+
+      <h3>Bitrate scaling</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Quality</th><th>Bitrate factor</th><th>Example (2.5 Mbps target)</th></tr></thead>
+          <tbody>
+            <tr class="quality-row-excellent"><td><code>excellent</code></td><td>100 %</td><td>2 500 kbps</td></tr>
+            <tr class="quality-row-good"><td><code>good</code></td><td>75 %</td><td>1 875 kbps</td></tr>
+            <tr class="quality-row-fair"><td><code>fair</code></td><td>50 %</td><td>1 250 kbps</td></tr>
+            <tr class="quality-row-poor"><td><code>poor</code></td><td>25 %</td><td>625 kbps</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Fine-tuning</h3>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    video<span class="op">:</span>    { maxBitrate<span class="op">:</span> <span class="num">3_000_000</span> }<span class="op">,</span>
+    adaptiveQuality<span class="op">:</span> {
+        intervalMs<span class="op">:</span>         <span class="num">3_000</span><span class="op">,</span>   <span class="cmt">// sample every 3 s  (default: 5 000)</span>
+        downgradeThreshold<span class="op">:</span>  <span class="num">2</span><span class="op">,</span>       <span class="cmt">// 2 bad readings → scale down (default: 2)</span>
+        upgradeThreshold<span class="op">:</span>    <span class="num">4</span><span class="op">,</span>       <span class="cmt">// 4 good readings → scale up  (default: 4)</span>
+        minVideoBitrate<span class="op">:</span>     <span class="num">200_000</span><span class="op">,</span> <span class="cmt">// never below 200 kbps       (default: 150 000)</span>
+    }<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+
+      <h3>AdaptiveQualityOptions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>intervalMs</code></td><td>number</td><td><span class="badge badge-def">5000</span></td><td>Stats polling interval in milliseconds.</td></tr>
+            <tr><td><code>downgradeThreshold</code></td><td>number</td><td><span class="badge badge-def">2</span></td><td>Consecutive degraded readings before scaling down.</td></tr>
+            <tr><td><code>upgradeThreshold</code></td><td>number</td><td><span class="badge badge-def">4</span></td><td>Consecutive improved readings before scaling up.</td></tr>
+            <tr><td><code>minVideoBitrate</code></td><td>number</td><td><span class="badge badge-def">150 000</span></td><td>Minimum video bitrate floor in bps.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout-info">
+        <div class="callout-title">Note</div>
+        <p>The target bitrate is taken from <code>video.maxBitrate</code> when set, or defaults to 2.5 Mbps. Adaptive quality adjusts the single-layer video sender and does not modify simulcast layer activity.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="auto-reconnect">
+      <h2>Auto-Reconnect</h2>
+      <p>Pass <code>autoReconnect: true</code> to automatically retry when the connection fails after a previously successful session. It does <strong>not</strong> retry signalling errors (e.g. a <code>401</code> from the server).</p>
+<pre><code><span class="kw">const</span> client <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span>     <span class="str">'https://ingest.example.com/whip/live'</span><span class="op">,</span>
+    autoReconnect<span class="op">:</span> <span class="kw">true</span><span class="op">,</span>
+})<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'reconnecting'</span><span class="op">,</span> (attempt<span class="op">,</span> delayMs) <span class="op">=&gt;</span>
+    console<span class="op">.</span><span class="fn">log</span>(<span class="op">`</span>Attempt <span class="op">${</span>attempt<span class="op">}</span> in <span class="op">${</span>delayMs<span class="op">}</span>ms<span class="op">`</span>)
+)<span class="op">;</span>
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'reconnected'</span><span class="op">,</span> () <span class="op">=&gt;</span> console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Session restored'</span>))<span class="op">;</span></code></pre>
+
+      <h3>AutoReconnectOptions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>maxAttempts</code></td><td>number</td><td><span class="badge badge-def">5</span></td><td>Maximum number of reconnection attempts.</td></tr>
+            <tr><td><code>initialDelayMs</code></td><td>number</td><td><span class="badge badge-def">1000</span></td><td>Delay before the second attempt. The first retry is immediate.</td></tr>
+            <tr><td><code>maxDelayMs</code></td><td>number</td><td><span class="badge badge-def">30 000</span></td><td>Upper bound on the inter-attempt delay.</td></tr>
+            <tr><td><code>backoff</code></td><td>'exponential' | 'fixed'</td><td><span class="badge badge-def">exponential</span></td><td>Delay growth strategy.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="connection-stats">
+      <h2>Connection Stats</h2>
+      <p>Poll <code>getStats()</code> to monitor stream health. Bitrate is computed as a delta between consecutive calls.</p>
+<pre><code><span class="kw">const</span> timer <span class="op">=</span> <span class="fn">setInterval</span>(<span class="kw">async</span> () <span class="op">=&gt;</span> {
+    <span class="kw">const</span> stats <span class="op">=</span> <span class="kw">await</span> client<span class="op">.</span><span class="fn">getStats</span>()<span class="op">;</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>quality)<span class="op">;</span>           <span class="cmt">// 'excellent' | 'good' | 'fair' | 'poor'</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>roundTripTime)<span class="op">;</span>     <span class="cmt">// seconds</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>    <span class="cmt">// bps</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>frameRate)<span class="op">;</span>  <span class="cmt">// fps</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>audio<span class="op">?.</span>packetsLostRate)<span class="op">;</span> <span class="cmt">// 0–1</span>
+}<span class="op">,</span> <span class="num">2_000</span>)<span class="op">;</span></code></pre>
+
+      <h3>StreamStats</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>timestamp</code></td><td>number</td><td>Ms since epoch when the snapshot was taken.</td></tr>
+            <tr><td><code>audio</code></td><td>AudioStats | null</td><td>Audio stats. <code>null</code> when no audio track is active.</td></tr>
+            <tr><td><code>video</code></td><td>VideoStats | null</td><td>Video stats. <code>null</code> when no video track is active.</td></tr>
+            <tr><td><code>roundTripTime</code></td><td>number | null</td><td>RTT in seconds from RTCP. <code>null</code> until the first report.</td></tr>
+            <tr><td><code>quality</code></td><td>ConnectionQuality</td><td>Derived quality label.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Quality thresholds</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Quality</th><th>Packet-loss rate</th><th>RTT</th></tr></thead>
+          <tbody>
+            <tr class="quality-row-excellent"><td><code>excellent</code></td><td>&lt; 1 %</td><td>&lt; 50 ms</td></tr>
+            <tr class="quality-row-good"><td><code>good</code></td><td>&lt; 3 %</td><td>&lt; 150 ms</td></tr>
+            <tr class="quality-row-fair"><td><code>fair</code></td><td>&lt; 8 %</td><td>&lt; 300 ms</td></tr>
+            <tr class="quality-row-poor"><td><code>poor</code></td><td>&ge; 8 %</td><td>&ge; 300 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="sdp-utilities">
+      <h2>SDP Utilities</h2>
+      <p>Low-level SDP helpers exported for advanced use cases such as custom signalling layers or testing.</p>
+<pre><code><span class="kw">import</span> {
+    preferCodec<span class="op">,</span> setBandwidth<span class="op">,</span> addSimulcast<span class="op">,</span>
+    patchFmtp<span class="op">,</span> listCodecs<span class="op">,</span> extractSsrc<span class="op">,</span> removeExtmap<span class="op">,</span>
+} <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Prefer H.264 in the video section</span>
+<span class="kw">const</span> sdp <span class="op">=</span> <span class="fn">preferCodec</span>(originalSdp<span class="op">,</span> <span class="str">'video'</span><span class="op">,</span> <span class="str">'H264'</span>)<span class="op">;</span>
+
+<span class="cmt">// Add a 3 Mbps bandwidth limit to the video section</span>
+<span class="kw">const</span> sdp <span class="op">=</span> <span class="fn">setBandwidth</span>(sdp<span class="op">,</span> <span class="str">'video'</span><span class="op">,</span> <span class="num">3_000</span>)<span class="op">;</span>
+
+<span class="cmt">// List codec names in the audio section</span>
+<span class="kw">const</span> codecs <span class="op">=</span> <span class="fn">listCodecs</span>(sdp<span class="op">,</span> <span class="str">'audio'</span>)<span class="op">;</span>
+
+<span class="cmt">// Patch Opus fmtp parameters</span>
+<span class="kw">const</span> sdp <span class="op">=</span> <span class="fn">patchFmtp</span>(sdp<span class="op">,</span> <span class="str">'audio'</span><span class="op">,</span> <span class="str">'opus'</span><span class="op">,</span> { usedtx<span class="op">:</span> <span class="num">1</span><span class="op">,</span> stereo<span class="op">:</span> <span class="num">1</span> })<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="ice-utilities">
+      <h2>ICE Utilities</h2>
+<pre><code><span class="kw">import</span> { setupIceTrickle<span class="op">,</span> waitForIceGathering } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> cleanup <span class="op">=</span> <span class="fn">setupIceTrickle</span>(pc<span class="op">,</span> {
+    mode<span class="op">:</span> <span class="str">'end-of-candidates'</span><span class="op">,</span>   <span class="cmt">// or 'immediate'</span>
+    <span class="fn">onCandidates</span><span class="op">:</span> <span class="kw">async</span> (candidates) <span class="op">=&gt;</span> {
+        <span class="kw">await</span> <span class="fn">fetch</span>(resourceUrl<span class="op">,</span> {
+            method<span class="op">:</span> <span class="str">'PATCH'</span><span class="op">,</span>
+            body<span class="op">:</span> candidates<span class="op">.</span><span class="fn">map</span>((c) <span class="op">=&gt;</span> <span class="op">`</span>a<span class="op">=${</span>c<span class="op">.</span>candidate<span class="op">}`</span>)<span class="op">.</span><span class="fn">join</span>(<span class="str">'\r\n'</span>)<span class="op">,</span>
+        })<span class="op">;</span>
+    }<span class="op">,</span>
+})<span class="op">;</span>
+
+cleanup()<span class="op">;</span>  <span class="cmt">// remove event listeners when done</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="media-helpers">
+      <h2>Media Helpers</h2>
+      <p>Convenience wrappers around <code>getUserMedia</code> and <code>getDisplayMedia</code> that set <code>contentHint</code> automatically.</p>
+
+      <h3>getUserStream()</h3>
+<pre><code><span class="kw">import</span> { getUserStream } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> stream <span class="op">=</span> <span class="kw">await</span> <span class="fn">getUserStream</span>({
+    videoContentHint<span class="op">:</span> <span class="str">'motion'</span><span class="op">,</span>   <span class="cmt">// default — optimises for camera movement</span>
+    audioContentHint<span class="op">:</span> <span class="str">'speech'</span><span class="op">,</span>   <span class="cmt">// default — optimises Opus for voice</span>
+})<span class="op">;</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span></code></pre>
+
+      <h3>getScreenStream()</h3>
+<pre><code><span class="kw">import</span> { getScreenStream } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> screen <span class="op">=</span> <span class="kw">await</span> <span class="fn">getScreenStream</span>({
+    audio<span class="op">:</span>            <span class="kw">true</span><span class="op">,</span>
+    videoConstraints<span class="op">:</span> { frameRate<span class="op">:</span> { ideal<span class="op">:</span> <span class="num">15</span> }<span class="op">,</span> width<span class="op">:</span> { max<span class="op">:</span> <span class="num">1920</span> } }<span class="op">,</span>
+})<span class="op">;</span>
+<span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(screen)<span class="op">;</span></code></pre>
+    </div>
+
+    <!-- Presets -->
+    <div class="doc-section" id="preset-livekit">
+      <h2>Preset — LiveKit</h2>
+      <p><a href="https://livekit.io" target="_blank" rel="noopener">LiveKit</a> is an open-source WebRTC SFU with managed cloud and self-hosted options. The preset enables simulcast and H.264 by default.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> livekit } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Publish</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://my-project.livekit.cloud/rtc/whip'</span><span class="op">,</span>
+    <span class="op">...</span>livekit<span class="op">.</span><span class="fn">whip</span>(accessToken)<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// View</span>
+<span class="kw">const</span> viewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://my-project.livekit.cloud/rtc/whep'</span><span class="op">,</span>
+    <span class="op">...</span>livekit<span class="op">.</span><span class="fn">whep</span>(accessToken)<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-ovenmedia">
+      <h2>Preset — OvenMedia Engine</h2>
+      <p><a href="https://github.com/AirenSoft/OvenMediaEngine" target="_blank" rel="noopener">OvenMedia Engine</a> is an open-source, real-time streaming server with native WHIP and WHEP support.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> ovenmedia } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Publish (no auth)</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:3333/live/stream1'</span><span class="op">,</span>
+    <span class="op">...</span>ovenmedia<span class="op">.</span><span class="fn">whip</span>()<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// View</span>
+<span class="kw">const</span> viewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:3334/live/stream1'</span><span class="op">,</span>
+    <span class="op">...</span>ovenmedia<span class="op">.</span><span class="fn">whep</span>()<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-cloudflare">
+      <h2>Preset — Cloudflare Stream</h2>
+      <p><a href="https://developers.cloudflare.com/stream/" target="_blank" rel="noopener">Cloudflare Stream</a> is a managed video platform with WHIP ingest and WHEP egress. The preset enforces H.264 and sets a 128 kbps audio limit.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> cloudflare } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">const</span> uid          <span class="op">=</span> <span class="str">'customer-xyz'</span><span class="op">;</span>
+<span class="kw">const</span> liveInputKey <span class="op">=</span> <span class="str">'abc123...'</span><span class="op">;</span>
+
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="op">`</span>https<span class="op">://${</span>uid<span class="op">}</span>.cloudflarestream.com/<span class="op">${</span>liveInputKey<span class="op">}</span>/webrtc/publish<span class="op">`</span><span class="op">,</span>
+    <span class="op">...</span>cloudflare<span class="op">.</span><span class="fn">whip</span>()<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-antmedia">
+      <h2>Preset — Ant Media Server</h2>
+      <p><a href="https://antmedia.io" target="_blank" rel="noopener">Ant Media Server</a> supports WHIP and WHEP in both Community and Enterprise editions.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> antmedia } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Community edition (no auth)</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:5080/WebRTCAppEE/whip/stream1'</span><span class="op">,</span>
+    <span class="op">...</span>antmedia<span class="op">.</span><span class="fn">whip</span>()<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// Enterprise edition (JWT)</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://ams.example.com:5443/WebRTCAppEE/whip/stream1'</span><span class="op">,</span>
+    <span class="op">...</span>antmedia<span class="op">.</span><span class="fn">whip</span>(jwtToken)<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <!-- Reference -->
+    <div class="doc-section" id="error-handling">
+      <h2>Error Handling</h2>
+      <p>All errors extend <code>WhipWhepError</code> and carry an optional <code>status</code> property with the HTTP response code.</p>
+<pre><code><span class="kw">import</span> { WHIPError<span class="op">,</span> WHEPError<span class="op">,</span> TimeoutError<span class="op">,</span> InvalidStateError } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="kw">try</span> {
+    <span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span>
+} <span class="kw">catch</span> (err) {
+    <span class="kw">if</span> (err <span class="kw">instanceof</span> <span class="typ">TimeoutError</span>) {
+        console<span class="op">.</span><span class="fn">error</span>(<span class="str">'SDP exchange timed out'</span>)<span class="op">;</span>
+    } <span class="kw">else if</span> (err <span class="kw">instanceof</span> <span class="typ">WHIPError</span> <span class="op">&amp;&amp;</span> err<span class="op">.</span>status <span class="op">===</span> <span class="num">401</span>) {
+        console<span class="op">.</span><span class="fn">error</span>(<span class="str">'Unauthorized — check your token'</span>)<span class="op">;</span>
+    } <span class="kw">else if</span> (err <span class="kw">instanceof</span> <span class="typ">WHIPError</span> <span class="op">&amp;&amp;</span> err<span class="op">.</span>status <span class="op">===</span> <span class="num">503</span>) {
+        console<span class="op">.</span><span class="fn">error</span>(<span class="str">'Server at capacity'</span>)<span class="op">;</span>
+    } <span class="kw">else</span> {
+        <span class="kw">throw</span> err<span class="op">;</span>
+    }
+}</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Class</th><th>When thrown</th></tr></thead>
+          <tbody>
+            <tr><td><code>WHIPError</code></td><td><code>WHIPClient.publish()</code> — server rejected the offer or network error.</td></tr>
+            <tr><td><code>WHEPError</code></td><td><code>WHEPClient.view()</code> — server rejected the offer or network error.</td></tr>
+            <tr><td><code>TimeoutError</code></td><td>SDP exchange exceeded <code>timeout</code>, or ICE exceeded <code>iceConnectionTimeout</code>.</td></tr>
+            <tr><td><code>InvalidStateError</code></td><td>Method called in the wrong lifecycle state.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="doc-section" id="typescript">
+      <h2>TypeScript</h2>
+      <p>The library is written in TypeScript and ships full type declarations. All public types are exported directly from the package root.</p>
+<pre><code><span class="kw">import</span> <span class="kw">type</span> {
+    <span class="cmt">// Client options</span>
+    WHIPClientOptions<span class="op">,</span>
+    WHEPClientOptions<span class="op">,</span>
+    AudioEncodingOptions<span class="op">,</span>
+    VideoLayerOptions<span class="op">,</span>
+    PublishOptions<span class="op">,</span>
+    ViewOptions<span class="op">,</span>
+
+    <span class="cmt">// Reconnect & adaptive quality</span>
+    AutoReconnectOptions<span class="op">,</span>
+    AdaptiveQualityOptions<span class="op">,</span>       <span class="cmt">// NEW in v1.1</span>
+
+    <span class="cmt">// Events</span>
+    BaseClientEvents<span class="op">,</span>
+    WHIPClientEvents<span class="op">,</span>
+    WHEPClientEvents<span class="op">,</span>
+
+    <span class="cmt">// Stats</span>
+    StreamStats<span class="op">,</span>
+    AudioStats<span class="op">,</span>
+    VideoStats<span class="op">,</span>
+    ConnectionQuality<span class="op">,</span>
+
+    <span class="cmt">// Misc</span>
+    ClientState<span class="op">,</span>
+    Logger<span class="op">,</span>
+} <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span></code></pre>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // ── Sidebar active link on scroll ──────────────────────────────── //
+  const navItems = document.querySelectorAll('.nav-item');
+  const navIds = new Set(
+    Array.from(navItems).map(a => a.getAttribute('href')?.slice(1)).filter(Boolean)
+  );
+
+  // scroll-padding-top is 80px — threshold must match so anchor clicks land correctly
+  const THRESHOLD = 88;
+
+  function absTop(el) {
+    let t = 0;
+    while (el) { t += el.offsetTop; el = el.offsetParent; }
+    return t;
+  }
+
+  // Use .doc-section[id] only — precise, no false positives from nested divs
+  let sections = Array.from(document.querySelectorAll('.doc-section[id]'))
+    .filter(el => navIds.has(el.id))
+    .map(el => ({ id: el.id, top: absTop(el) }));
+
+  function setActive(id) {
+    navItems.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+  }
+
+  let ticking = false;
+  function onScroll() {
+    const threshold = window.scrollY + THRESHOLD;
+    let activeId = sections[0]?.id ?? null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (threshold >= sections[i].top) { activeId = sections[i].id; break; }
+    }
+    setActive(activeId);
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) { requestAnimationFrame(onScroll); ticking = true; }
+  }, { passive: true });
+
+  window.addEventListener('resize', () => {
+    sections.forEach(s => { s.top = absTop(document.getElementById(s.id)); });
+  });
+
+  onScroll();
+
+  // ── Mobile sidebar ──────────────────────────────────────────────── //
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+  }
+
+  // ── Copy install ────────────────────────────────────────────────── //
+  function copyInstall(btn) {
+    navigator.clipboard.writeText('npm install whip-whep-client').then(() => {
+      btn.textContent = 'copied!';
+      setTimeout(() => btn.textContent = 'copy', 1500);
+    });
+  }
+</script>
+
+</body>
+</html>
