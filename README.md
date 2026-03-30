@@ -38,6 +38,10 @@ Implementing WHIP or WHEP by hand is entirely possible — the protocol is just 
 | Session recovery               | PATCH resource URL with `If-Match` ETag header, fall back gracefully on failure | `endpointRecovery: true`                   |
 | Adaptive bitrate               | Poll stats, compute quality score, call `setParameters()` with scaled bitrate   | `adaptiveQuality: true`                    |
 | Track replacement              | Find the correct `RTCRtpSender`, call `replaceTrack`, update your stream refs   | `replaceTrack('video', newTrack)`          |
+| Muting tracks                  | Find sender, toggle `track.enabled`, re-find it if reconnect swaps sender refs  | `muteTrack('audio')` / `unmuteTrack`       |
+| Screen publishing              | `getDisplayMedia`, optionally mix mic, handle errors, stop tracks on failure    | `publishScreen(options?)`                  |
+| Stats polling                  | `setInterval` + `getStats()`, manage the timer, remember to clear on stop       | `watchStats(intervalMs, callback)`         |
+| Audio level metering           | `AudioContext`, `AnalyserNode`, `getFloatTimeDomainData`, compute RMS, interval | `startAudioLevelMonitor()` → `audiolevel` event |
 | Stream statistics              | Iterate `RTCStatsReport`, compute deltas, derive quality from loss + RTT        | `getStats()` returns typed `StreamStats`   |
 | ICE hang detection             | Set up a manual timer, tear down the peer connection on expiry                  | `iceConnectionTimeout` option              |
 | Logging                        | Sprinkle `console.log` calls, remove for production                             | `logger` option — pass any logger          |
@@ -169,11 +173,12 @@ Starts publishing. Creates the `RTCPeerConnection`, adds media tracks, exchanges
 **PublishOptions**
 
 
-| Option      | Type      | Default          | Description                      |
-| ----------- | --------- | ---------------- | -------------------------------- |
-| `audio`     | `boolean` | `true`           | Include the audio track          |
-| `video`     | `boolean` | `true`           | Include the video track          |
-| `simulcast` | `boolean` | from constructor | Override simulcast for this call |
+| Option      | Type          | Default          | Description                                          |
+| ----------- | ------------- | ---------------- | ---------------------------------------------------- |
+| `audio`     | `boolean`     | `true`           | Include the audio track                              |
+| `video`     | `boolean`     | `true`           | Include the video track                              |
+| `simulcast` | `boolean`     | from constructor | Override simulcast for this call                     |
+| `signal`    | `AbortSignal` | —                | Cancel an in-flight `publish()` call; throws `DOMException('AbortError')` |
 
 
 ### `stop()`
@@ -201,6 +206,50 @@ await client.replaceTrack(kind: 'audio' | 'video', track: MediaStreamTrack): Pro
 Replaces the active sender track without renegotiation. The swap takes effect immediately via `RTCRtpSender.replaceTrack()`. Common use cases: switching from camera to screen share, muting via a silent track, or swapping microphone devices.
 
 The stored stream used by `reconnect()` is updated automatically so future reconnects use the new track.
+
+### `muteTrack(kind)` / `unmuteTrack(kind)` / `isTrackMuted(kind)`
+
+```ts
+client.muteTrack(kind: 'audio' | 'video'): void
+client.unmuteTrack(kind: 'audio' | 'video'): void
+client.isTrackMuted(kind: 'audio' | 'video'): boolean
+```
+
+Toggle a sender track on/off without renegotiation. Muting sets `MediaStreamTrack.enabled = false`, which sends silence (audio) or black frames (video) to the remote end. The track remains live — no SDP exchange occurs. `isTrackMuted` returns `true` when the track is currently muted.
+
+### `publishScreen(options?)`
+
+```ts
+const stream = await client.publishScreen(options?: PublishScreenOptions): Promise<MediaStream>
+```
+
+Captures a screen, window, or browser tab via `getDisplayMedia` and publishes it immediately. Returns the `MediaStream` that is being published.
+
+**`PublishScreenOptions`**
+
+| Option           | Type                                     | Default | Description                                               |
+| ---------------- | ---------------------------------------- | ------- | --------------------------------------------------------- |
+| `displayAudio`   | `boolean`                                | `false` | Include the display's system audio                        |
+| `micAudio`       | `boolean \| MediaTrackConstraints`       | `false` | Capture microphone audio and mix it into the stream       |
+| `videoConstraints` | `MediaTrackConstraints`                | —       | Constraints forwarded to `getDisplayMedia` (resolution, frame rate, etc.) |
+| `publishOptions` | `Omit<PublishOptions, 'audio' \| 'video'>` | —     | Extra options forwarded to the underlying `publish()` call (e.g. `signal`) |
+
+### `watchStats(intervalMs, callback)`
+
+```ts
+const stop = client.watchStats(intervalMs: number, callback: (stats: StreamStats) => void): () => void
+```
+
+Polls `getStats()` on a fixed interval and calls `callback` with each snapshot. Returns a cleanup function — call it to stop polling. Equivalent to a `setInterval` around `getStats()` but automatically cancelled when `stop()` is called.
+
+### `startAudioLevelMonitor(intervalMs?)` / `stopAudioLevelMonitor()`
+
+```ts
+client.startAudioLevelMonitor(intervalMs?: number): void   // default: 100 ms
+client.stopAudioLevelMonitor(): void
+```
+
+Starts polling the outgoing audio amplitude via `AudioContext` + `AnalyserNode`. On each tick the library computes the normalised RMS of the audio buffer and emits an `audiolevel` event with a value in `[0, 1]`. Call `stopAudioLevelMonitor()` to detach the analyser and close the `AudioContext`. The monitor is stopped automatically by `stop()`.
 
 ### `getStats()`
 
@@ -233,6 +282,7 @@ Returns a normalised snapshot of the current session statistics. Bitrate values 
 | `reconnecting`             | `attempt: number, delayMs: number` | Auto-reconnect attempt starting                 |
 | `reconnected`              | —                               | Auto-reconnect successfully restored the session   |
 | `qualitychange`            | `quality: ConnectionQuality`    | Adaptive quality changed the effective bitrate level (requires `adaptiveQuality`) |
+| `audiolevel`               | `level: number`                 | Normalised RMS amplitude in `[0, 1]` (requires `startAudioLevelMonitor()`)        |
 | `connectionstatechange`    | `state: RTCPeerConnectionState` | Raw connection state changes                       |
 | `iceconnectionstatechange` | `state: RTCIceConnectionState`  | ICE connection state changes                       |
 | `icegatheringstatechange`  | `state: RTCIceGatheringState`   | ICE gathering state changes                        |
@@ -445,7 +495,7 @@ Codec preference reorders the payload type list in the `m=` line of the SDP offe
 
 ### Screen Share (legacy)
 
-`WHIPClient.publish()` accepts any `MediaStream`. For screen capture, prefer the `getScreenStream` utility which sets the correct `contentHint` automatically (see [Screen Share](#screen-share) in Advanced Usage). Raw `getDisplayMedia` also works:
+`WHIPClient.publish()` accepts any `MediaStream`. For screen capture, prefer `publishScreen()` or the `getScreenStream` utility which sets the correct `contentHint` automatically. Raw `getDisplayMedia` also works:
 
 ```ts
 const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -454,24 +504,93 @@ await client.publish(screen, { audio: true, video: true });
 
 ### Screen Share
 
-Use `getScreenStream` to capture the screen with sensible defaults and the correct `contentHint` for the encoder:
+Use `publishScreen()` to capture and publish in one call. It handles `getDisplayMedia`, optional mic mixing, and cleans up tracks if publishing fails:
 
 ```ts
-import { WHIPClient, getScreenStream } from 'whip-whep-client';
-
-const client = new WHIPClient({ endpoint: '...' });
-const screen = await getScreenStream({ audio: true });
-
-await client.publish(screen, { video: true, audio: true });
+const stream = await client.publishScreen({
+    displayAudio: true,   // include system audio if the browser/OS allows
+    micAudio: true,       // also capture microphone
+    videoConstraints: { frameRate: { ideal: 15 }, width: { max: 1920 } },
+});
 ```
 
-Override the defaults via `videoConstraints`:
+For capture-only (without publishing), use the `getScreenStream` utility:
 
 ```ts
+import { getScreenStream } from 'whip-whep-client';
+
 const screen = await getScreenStream({
     audio: false,
     videoConstraints: { frameRate: { ideal: 15 }, width: { max: 1280 } },
 });
+```
+
+### Muting Tracks
+
+Toggle audio or video on/off without renegotiation:
+
+```ts
+// Mute microphone — sends silence to the remote end
+client.muteTrack('audio');
+
+// Unmute — resumes sending real audio
+client.unmuteTrack('audio');
+
+// Check current state
+if (client.isTrackMuted('video')) {
+    console.log('Camera is muted (sending black frames)');
+}
+```
+
+### Audio Level Monitoring
+
+Listen to outgoing audio amplitude in real time:
+
+```ts
+client.on('audiolevel', (level) => {
+    // level is a normalised RMS value in [0, 1]
+    vuMeter.style.width = `${level * 100}%`;
+});
+
+client.startAudioLevelMonitor(50);   // poll every 50 ms (default: 100 ms)
+
+// Stop monitoring (also called automatically by stop()):
+client.stopAudioLevelMonitor();
+```
+
+### Watching Stats
+
+`watchStats` is a convenience wrapper around `getStats()` that handles the interval and cleanup:
+
+```ts
+const stopWatching = client.watchStats(1_000, (stats) => {
+    console.log('Quality:', stats.quality);
+    console.log('Video bitrate:', stats.video?.bitrate, 'bps');
+    console.log('RTT:', stats.roundTripTime, 's');
+});
+
+// Stop polling (also cancelled automatically by stop()):
+stopWatching();
+```
+
+### Cancelling publish()
+
+Pass an `AbortSignal` to cancel an in-flight `publish()` call:
+
+```ts
+const controller = new AbortController();
+
+// Cancel after 5 seconds
+const timer = setTimeout(() => controller.abort(), 5_000);
+
+try {
+    await client.publish(stream, { signal: controller.signal });
+    clearTimeout(timer);
+} catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log('Publish was cancelled');
+    }
+}
 ```
 
 ### Camera and Microphone
@@ -806,6 +925,7 @@ import type {
     VideoLayerOptions,
     AutoReconnectOptions,
     AdaptiveQualityOptions,
+    PublishScreenOptions,
     Logger,
     StreamStats,
     ConnectionQuality,
