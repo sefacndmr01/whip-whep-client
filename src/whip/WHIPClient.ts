@@ -3,6 +3,7 @@ import type {
 	WHIPClientOptions,
 	WHIPClientEvents,
 	PublishOptions,
+	PublishScreenOptions,
 	StreamStats,
 	AudioStats,
 	VideoStats,
@@ -12,6 +13,7 @@ import type {
 import { WHIPError, InvalidStateError } from '../core/errors.js';
 import { preferCodec, addSimulcast, setBandwidth, patchFmtp } from '../utils/sdp.js';
 import { setupIceTrickle } from '../utils/ice.js';
+import { getScreenStream } from '../utils/media.js';
 import { computeQuality, type StatsSnapshot } from '../utils/stats.js';
 import {
 	DEFAULT_SIMULCAST_LAYERS,
@@ -102,6 +104,12 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 	private _degradedCount = 0;
 	private _improvedCount = 0;
 
+	// Audio level monitor state
+	private _audioMonitorTimer: ReturnType<typeof setInterval> | null = null;
+	private _audioContext: AudioContext | null = null;
+	private _audioAnalyser: AnalyserNode | null = null;
+	private _audioLevelBuffer: Float32Array<ArrayBuffer> | null = null;
+
 	constructor(options: WHIPClientOptions) {
 		super(options);
 		this.whipOptions = options;
@@ -144,8 +152,14 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		this._lastPublishOptions = options;
 		this._statsSnapshot = null;
 
-		const { audio = true, video = true } = options;
+		const { audio = true, video = true, signal } = options;
 		const useSimulcast = options.simulcast ?? this.whipOptions.simulcast ?? false;
+
+		if (signal?.aborted) {
+			this.setState('failed');
+			this.close();
+			throw new DOMException('Aborted', 'AbortError');
+		}
 
 		this.options.logger?.info('Publishing stream', { audio, video, simulcast: useSimulcast });
 
@@ -160,13 +174,18 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 
 			await pc.setLocalDescription({ type: 'offer', sdp });
 
-			const { sdpAnswer, resourceUrl } = await this.postSdpOffer(sdp).catch((err) => {
+			const { sdpAnswer, resourceUrl } = await this.postSdpOffer(sdp, signal).catch((err) => {
+				// Propagate AbortError as-is so callers can distinguish intentional aborts
+				if (err instanceof DOMException && err.name === 'AbortError') throw err;
 				throw err instanceof WHIPError
 					? err
 					: new WHIPError('Failed to exchange SDP with WHIP endpoint', { cause: err });
 			});
 
 			this.resourceUrl = resourceUrl;
+
+			if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
 			await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
 
 			await this.applyEncodingConstraints(pc);
@@ -201,6 +220,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		this.cleanupIce?.();
 		this.cleanupIce = null;
 		this.stopAdaptiveQuality();
+		this.stopAudioLevelMonitor();
 
 		await this.deleteResource();
 		this.close();
@@ -223,6 +243,206 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 
 		this._reconnectToken++;
 		await this._doReconnect();
+	}
+
+	/**
+	 * Mute the active audio or video sender by disabling its track.
+	 *
+	 * Disabling the track sends silence (audio) or a black frame (video) to the
+	 * remote peer without re-negotiation. The sender remains active and can be
+	 * unmuted instantly via `unmuteTrack()`.
+	 *
+	 * @param kind `'audio'` or `'video'`.
+	 * @throws {InvalidStateError} When there is no active sender for the given kind.
+	 */
+	muteTrack(kind: 'audio' | 'video'): void {
+		if (!this.pc) throw new InvalidStateError('No active peer connection');
+		const sender = this.pc.getSenders().find((s) => s.track?.kind === kind);
+		if (!sender?.track) throw new InvalidStateError(`No active ${kind} sender`);
+		sender.track.enabled = false;
+		this.options.logger?.debug('Track muted', { kind });
+	}
+
+	/**
+	 * Unmute the active audio or video sender by re-enabling its track.
+	 *
+	 * @param kind `'audio'` or `'video'`.
+	 * @throws {InvalidStateError} When there is no active sender for the given kind.
+	 */
+	unmuteTrack(kind: 'audio' | 'video'): void {
+		if (!this.pc) throw new InvalidStateError('No active peer connection');
+		const sender = this.pc.getSenders().find((s) => s.track?.kind === kind);
+		if (!sender?.track) throw new InvalidStateError(`No active ${kind} sender`);
+		sender.track.enabled = true;
+		this.options.logger?.debug('Track unmuted', { kind });
+	}
+
+	/**
+	 * Returns `true` when the given track kind is currently muted (i.e. the
+	 * underlying `MediaStreamTrack.enabled` is `false`).
+	 *
+	 * @param kind `'audio'` or `'video'`.
+	 * @throws {InvalidStateError} When there is no active sender for the given kind.
+	 */
+	isTrackMuted(kind: 'audio' | 'video'): boolean {
+		if (!this.pc) throw new InvalidStateError('No active peer connection');
+		const sender = this.pc.getSenders().find((s) => s.track?.kind === kind);
+		if (!sender?.track) throw new InvalidStateError(`No active ${kind} sender`);
+		return !sender.track.enabled;
+	}
+
+	/**
+	 * Capture the screen / window / tab and publish it to the WHIP endpoint.
+	 *
+	 * Calls `getDisplayMedia` internally (triggering the browser's native
+	 * screen-picker). An optional microphone track can be added via
+	 * `micAudio`. The captured `MediaStream` is returned so the caller can
+	 * stop individual tracks when sharing ends.
+	 *
+	 * **Typical usage**
+	 * ```ts
+	 * const stream = await client.publishScreen({ micAudio: true });
+	 *
+	 * // Stop sharing when the user clicks a button
+	 * stopBtn.onclick = () => {
+	 *   for (const t of stream.getTracks()) t.stop();
+	 *   await client.stop();
+	 * };
+	 * ```
+	 *
+	 * @param options Screen capture and publish configuration.
+	 * @returns The captured `MediaStream` (video + optional audio tracks).
+	 *
+	 * @throws {DOMException}      `'NotAllowedError'` when the user denies the screen picker.
+	 * @throws {WHIPError}         On server rejection or network error.
+	 * @throws {InvalidStateError} When the client is not in the `'idle'` state.
+	 */
+	async publishScreen(options: PublishScreenOptions = {}): Promise<MediaStream> {
+		this.assertIdle('publishScreen');
+
+		const displayStream = await getScreenStream({
+			audio: options.displayAudio ?? false,
+			...(options.videoConstraints && { videoConstraints: options.videoConstraints }),
+		});
+
+		let audioTrack: MediaStreamTrack | undefined;
+
+		if (options.micAudio) {
+			const constraints = typeof options.micAudio === 'boolean' ? true : options.micAudio;
+			const micStream = await navigator.mediaDevices
+				.getUserMedia({ audio: constraints, video: false })
+				.catch((err) => {
+					for (const t of displayStream.getTracks()) t.stop();
+					throw err;
+				});
+			audioTrack = micStream.getAudioTracks()[0];
+		} else if (options.displayAudio) {
+			audioTrack = displayStream.getAudioTracks()[0];
+		}
+
+		const stream = new MediaStream([
+			...displayStream.getVideoTracks(),
+			...(audioTrack ? [audioTrack] : []),
+		]);
+
+		await this.publish(stream, {
+			...options.publishOptions,
+			audio: !!audioTrack,
+			video: true,
+		}).catch((err) => {
+			for (const t of stream.getTracks()) t.stop();
+			throw err;
+		});
+
+		return stream;
+	}
+
+	/**
+	 * Start monitoring the outgoing audio level and emitting `'audiolevel'`
+	 * events at the given interval.
+	 *
+	 * Internally creates an `AudioContext` and connects the active audio
+	 * sender's track to an `AnalyserNode`. The emitted `level` value is the
+	 * normalised RMS amplitude of the audio signal in the range **[0, 1]**.
+	 *
+	 * Call `stopAudioLevelMonitor()` to release the `AudioContext` and stop
+	 * the polling timer. The monitor is stopped automatically by `stop()`.
+	 *
+	 * @param intervalMs Polling interval in milliseconds. Defaults to `100`.
+	 * @throws {InvalidStateError} When called before `publish()` or when there
+	 *   is no active audio sender.
+	 */
+	startAudioLevelMonitor(intervalMs = 100): void {
+		if (!this.pc) throw new InvalidStateError('No active peer connection');
+
+		const sender = this.pc.getSenders().find((s) => s.track?.kind === 'audio');
+		if (!sender?.track) throw new InvalidStateError('No active audio sender');
+
+		this.stopAudioLevelMonitor();
+
+		const ctx = new AudioContext();
+		const source = ctx.createMediaStreamSource(new MediaStream([sender.track]));
+		const analyser = ctx.createAnalyser();
+		analyser.fftSize = 256;
+		source.connect(analyser);
+
+		this._audioContext = ctx;
+		this._audioAnalyser = analyser;
+		this._audioLevelBuffer = new Float32Array(analyser.frequencyBinCount);
+
+		this._audioMonitorTimer = setInterval(() => {
+			if (!this._audioAnalyser || !this._audioLevelBuffer) return;
+			this._audioAnalyser.getFloatTimeDomainData(this._audioLevelBuffer);
+			let sum = 0;
+			for (const val of this._audioLevelBuffer) sum += val * val;
+			const rms = Math.sqrt(sum / this._audioLevelBuffer.length);
+			this.emit('audiolevel', Math.min(1, rms));
+		}, intervalMs);
+
+		this.options.logger?.debug('Audio level monitor started', { intervalMs });
+	}
+
+	/**
+	 * Stop the audio level monitor started by `startAudioLevelMonitor()`.
+	 *
+	 * Clears the polling timer and closes the underlying `AudioContext`.
+	 * Safe to call when monitoring is not active.
+	 */
+	stopAudioLevelMonitor(): void {
+		if (this._audioMonitorTimer !== null) {
+			clearInterval(this._audioMonitorTimer);
+			this._audioMonitorTimer = null;
+		}
+		this._audioContext?.close().catch(() => {});
+		this._audioContext = null;
+		this._audioAnalyser = null;
+		this._audioLevelBuffer = null;
+	}
+
+	/**
+	 * Poll `getStats()` on a fixed interval and invoke `callback` with each
+	 * snapshot. Returns a cleanup function that stops the polling when called.
+	 *
+	 * @example
+	 * ```ts
+	 * const stop = client.watchStats(2_000, (stats) => {
+	 *   console.log('bitrate', stats.video?.bitrate);
+	 * });
+	 * // Later:
+	 * stop();
+	 * ```
+	 *
+	 * @param intervalMs How often to collect stats in milliseconds.
+	 * @param callback   Invoked with each `StreamStats` snapshot.
+	 * @returns A zero-argument cleanup function that cancels polling.
+	 */
+	watchStats(intervalMs: number, callback: (stats: StreamStats) => void): () => void {
+		const timer = setInterval(() => {
+			void this.getStats()
+				.then(callback)
+				.catch(() => {});
+		}, intervalMs);
+		return () => clearInterval(timer);
 	}
 
 	/**
@@ -505,6 +725,7 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 		this.cleanupIce?.();
 		this.cleanupIce = null;
 		this.stopAdaptiveQuality();
+		this.stopAudioLevelMonitor();
 	}
 
 	private async _doReconnect(): Promise<void> {

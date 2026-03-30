@@ -316,18 +316,30 @@ export abstract class BaseClient<
 	/**
 	 * POST an SDP offer to the WHIP / WHEP endpoint.
 	 *
+	 * @param sdpOffer       The SDP offer string to send.
+	 * @param externalSignal Optional `AbortSignal` from the caller. When the
+	 *   signal fires the in-flight fetch is cancelled and the original
+	 *   `DOMException` is re-thrown so the caller can distinguish an intentional
+	 *   abort from a timeout.
 	 * @returns The SDP answer body and the resource URL from the `Location`
 	 *   response header.
 	 * @throws {TimeoutError}    When the request exceeds `options.timeout`.
+	 * @throws {DOMException}    When `externalSignal` is aborted.
 	 * @throws {WhipWhepError}   On network errors or non-201 responses.
 	 */
 	protected async postSdpOffer(
 		sdpOffer: string,
+		externalSignal?: AbortSignal,
 	): Promise<{ sdpAnswer: string; resourceUrl: string }> {
 		this.options.logger?.debug('POST SDP offer', { endpoint: this.options.endpoint });
 
+		if (externalSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), this.options.timeout);
+
+		const onExternalAbort = (): void => controller.abort(externalSignal!.reason);
+		externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
 		let response: Response;
 		try {
@@ -338,11 +350,14 @@ export abstract class BaseClient<
 				signal: controller.signal,
 			});
 		} catch (err) {
-			if (err instanceof DOMException && err.name === 'AbortError')
+			if (err instanceof DOMException && err.name === 'AbortError') {
+				if (externalSignal?.aborted) throw err; // propagate intentional abort
 				throw new TimeoutError(this.options.timeout);
+			}
 			throw new WhipWhepError('Network error during SDP POST', { cause: err });
 		} finally {
 			clearTimeout(timer);
+			externalSignal?.removeEventListener('abort', onExternalAbort);
 		}
 
 		if (response.status !== 201) {

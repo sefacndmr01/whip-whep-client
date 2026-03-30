@@ -519,6 +519,64 @@ export interface PublishOptions {
 	 * Takes precedence over the constructor-level `simulcast` option.
 	 */
 	simulcast?: boolean;
+
+	/**
+	 * An `AbortSignal` that cancels the publish operation when signalled.
+	 *
+	 * When the signal fires mid-publish, the in-flight HTTP request is aborted,
+	 * the peer connection is closed, and a `DOMException` with name
+	 * `'AbortError'` is thrown. Any partial server resource is cleaned up
+	 * automatically.
+	 *
+	 * @example
+	 * ```ts
+	 * const ac = new AbortController();
+	 * setTimeout(() => ac.abort(), 5_000);
+	 * await client.publish(stream, { signal: ac.signal });
+	 * ```
+	 */
+	signal?: AbortSignal;
+}
+
+/**
+ * Options for `WHIPClient.publishScreen()`.
+ *
+ * Controls which media sources are captured and combined into the published
+ * stream.
+ */
+export interface PublishScreenOptions {
+	/**
+	 * Request system / browser-tab audio from `getDisplayMedia`.
+	 *
+	 * Browser support varies: Chrome supports tab and system audio; Safari and
+	 * Firefox generally do not. Ignored when `micAudio` is also set (the
+	 * microphone track takes precedence as the published audio source).
+	 * Defaults to `false`.
+	 */
+	displayAudio?: boolean;
+
+	/**
+	 * Capture microphone audio via `getUserMedia` and use it as the published
+	 * audio track instead of display audio.
+	 *
+	 * Pass `true` to use browser defaults, or provide `MediaTrackConstraints`
+	 * to fine-tune (e.g. `{ echoCancellation: true }`).
+	 * Defaults to `false`.
+	 */
+	micAudio?: boolean | MediaTrackConstraints;
+
+	/**
+	 * Video constraints merged on top of the `getDisplayMedia` defaults
+	 * (`{ width: 1920, height: 1080, frameRate: 30 }`).
+	 */
+	videoConstraints?: MediaTrackConstraints;
+
+	/**
+	 * Per-call publish overrides forwarded to the underlying `publish()` call
+	 * (e.g. `simulcast`, `signal`). The `audio` and `video` flags are set
+	 * automatically based on what was captured and cannot be overridden here.
+	 */
+	publishOptions?: Omit<PublishOptions, 'audio' | 'video'>;
 }
 
 /**
@@ -614,4 +672,15 @@ export interface WHIPClientEvents extends BaseClientEvents {
 	 * @param quality  The new quality level driving the bitrate target.
 	 */
 	qualitychange: (quality: ConnectionQuality) => void;
+
+	/**
+	 * Fired periodically while audio level monitoring is active.
+	 *
+	 * Only emitted after `startAudioLevelMonitor()` is called.
+	 * `level` is a normalised RMS value in the range **[0, 1]**, where `0` is
+	 * silence and `1` is the maximum measurable amplitude.
+	 *
+	 * @param level  Normalised RMS audio level (0–1).
+	 */
+	audiolevel: (level: number) => void;
 }
