@@ -14,6 +14,7 @@ export type {
 	AudioEncodingOptions,
 	VideoLayerOptions,
 	PublishOptions,
+	PublishScreenOptions,
 	ViewOptions,
 	BaseClientEvents,
 	WHIPClientEvents,
