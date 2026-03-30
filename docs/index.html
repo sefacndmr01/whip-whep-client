@@ -396,7 +396,7 @@
         </svg>
         npm
       </a>
-      <span class="topbar-badge">v1.1.0</span>
+      <span class="topbar-badge">v1.2.0</span>
 
       <!-- Mobile hamburger -->
       <button class="menu-btn" onclick="toggleSidebar()" aria-label="Toggle menu">
@@ -427,10 +427,14 @@
         <span class="nav-group-title">WHIPClient</span>
         <a class="nav-item" href="#whip-options">Constructor Options</a>
         <a class="nav-item" href="#whip-publish">publish()</a>
+        <a class="nav-item" href="#whip-publish-screen">publishScreen()</a>
         <a class="nav-item" href="#whip-stop">stop()</a>
         <a class="nav-item" href="#whip-reconnect">reconnect()</a>
         <a class="nav-item" href="#whip-replace-track">replaceTrack()</a>
+        <a class="nav-item" href="#whip-mute-track">muteTrack() / unmuteTrack()</a>
         <a class="nav-item" href="#whip-get-stats">getStats()</a>
+        <a class="nav-item" href="#whip-watch-stats">watchStats()</a>
+        <a class="nav-item" href="#whip-audio-level">Audio Level Monitor</a>
         <a class="nav-item" href="#whip-events">Events</a>
       </div>
 
@@ -576,8 +580,8 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'str
             <tr><td><code>timeout</code></td><td>number</td><td>15000</td><td>Maximum ms to wait for the SDP exchange to complete.</td></tr>
             <tr><td><code>iceConnectionTimeout</code></td><td>number</td><td>—</td><td>Maximum ms to wait for ICE to reach <code>'connected'</code> after SDP exchange.</td></tr>
             <tr><td><code>autoReconnect</code></td><td>boolean | AutoReconnectOptions</td><td>—</td><td>Automatically retry on mid-session failure. See <a href="#auto-reconnect">Auto-Reconnect</a>.</td></tr>
-            <tr><td><code>endpointRecovery</code></td><td>boolean</td><td>false</td><td>Attempt PATCH-based session recovery before full reconnect. <span class="badge badge-new">NEW</span></td></tr>
-            <tr><td><code>adaptiveQuality</code></td><td>boolean | AdaptiveQualityOptions</td><td>—</td><td>Auto-scale video bitrate based on connection quality. <span class="badge badge-new">NEW</span></td></tr>
+            <tr><td><code>endpointRecovery</code></td><td>boolean</td><td>false</td><td>Attempt PATCH-based session recovery before full reconnect. <span class="badge badge-new">v1.1</span></td></tr>
+            <tr><td><code>adaptiveQuality</code></td><td>boolean | AdaptiveQualityOptions</td><td>—</td><td>Auto-scale video bitrate based on connection quality. <span class="badge badge-new">v1.1</span></td></tr>
             <tr><td><code>simulcast</code></td><td>boolean</td><td>false</td><td>Enable simulcast with three quality layers (high / mid / low).</td></tr>
             <tr><td><code>audioCodec</code></td><td>string</td><td>—</td><td>Preferred audio codec name, e.g. <code>'opus'</code>.</td></tr>
             <tr><td><code>videoCodec</code></td><td>string</td><td>—</td><td>Preferred video codec name, e.g. <code>'h264'</code>, <code>'vp8'</code>, <code>'av1'</code>.</td></tr>
@@ -633,12 +637,53 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'str
             <tr><td><code>audio</code></td><td>boolean</td><td>true</td><td>Include the audio track from the stream.</td></tr>
             <tr><td><code>video</code></td><td>boolean</td><td>true</td><td>Include the video track from the stream.</td></tr>
             <tr><td><code>simulcast</code></td><td>boolean</td><td>from constructor</td><td>Override simulcast for this specific call.</td></tr>
+            <tr><td><code>signal</code></td><td>AbortSignal</td><td>—</td><td>Cancel the publish operation. The in-flight HTTP request is aborted, the peer connection is closed, and a <code>DOMException('AbortError')</code> is thrown. <span class="badge badge-new">v1.2</span></td></tr>
           </tbody>
         </table>
       </div>
+      <h3>Cancelling with AbortSignal</h3>
+<pre><code><span class="kw">const</span> ac <span class="op">=</span> <span class="kw">new</span> <span class="typ">AbortController</span>()<span class="op">;</span>
+<span class="fn">setTimeout</span>(() <span class="op">=&gt;</span> ac<span class="op">.</span><span class="fn">abort</span>()<span class="op">,</span> <span class="num">5_000</span>)<span class="op">;</span>  <span class="cmt">// cancel if publish takes > 5 s</span>
+
+<span class="kw">try</span> {
+    <span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream<span class="op">,</span> { signal<span class="op">:</span> ac<span class="op">.</span>signal })<span class="op">;</span>
+} <span class="kw">catch</span> (err) {
+    <span class="kw">if</span> (err <span class="kw">instanceof</span> <span class="typ">DOMException</span> <span class="op">&amp;&amp;</span> err<span class="op">.</span>name <span class="op">===</span> <span class="str">'AbortError'</span>) {
+        console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Publish cancelled'</span>)<span class="op">;</span>
+    }
+}</code></pre>
       <div class="callout callout-warn">
         <div class="callout-title">State</div>
         <p>Throws <code>InvalidStateError</code> when called on a client that is not in the <code>'idle'</code> state. Create a new instance or call <code>reconnect()</code> instead.</p>
+      </div>
+    </div>
+
+    <div class="doc-section" id="whip-publish-screen">
+      <h2>publishScreen() <span class="badge badge-new">NEW in v1.2</span></h2>
+      <div class="method-sig"><span class="fn">publishScreen</span><span class="op">(</span>options<span class="op">?:</span> <span class="typ">PublishScreenOptions</span><span class="op">):</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="typ">MediaStream</span><span class="op">&gt;</span></div>
+      <p>Captures the screen (or window / browser tab) via <code>getDisplayMedia</code> and publishes it to the WHIP endpoint. Returns the captured <code>MediaStream</code> so the caller can stop individual tracks when sharing ends.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>displayAudio</code></td><td>boolean</td><td>false</td><td>Request system / tab audio from <code>getDisplayMedia</code>. Browser support varies — Chrome only.</td></tr>
+            <tr><td><code>micAudio</code></td><td>boolean | MediaTrackConstraints</td><td>false</td><td>Capture microphone audio via <code>getUserMedia</code> and use it as the published audio track. Takes precedence over <code>displayAudio</code>.</td></tr>
+            <tr><td><code>videoConstraints</code></td><td>MediaTrackConstraints</td><td>—</td><td>Video constraints merged on top of the defaults (1920 × 1080 @ 30 fps).</td></tr>
+            <tr><td><code>publishOptions</code></td><td>PublishOptions</td><td>—</td><td>Per-call overrides forwarded to the underlying <code>publish()</code> call (e.g. <code>signal</code>, <code>simulcast</code>).</td></tr>
+          </tbody>
+        </table>
+      </div>
+<pre><code><span class="cmt">// Screen share with microphone audio</span>
+<span class="kw">const</span> stream <span class="op">=</span> <span class="kw">await</span> client<span class="op">.</span><span class="fn">publishScreen</span>({ micAudio<span class="op">:</span> <span class="kw">true</span> })<span class="op">;</span>
+
+<span class="cmt">// Stop sharing when the user clicks a button</span>
+stopBtn<span class="op">.</span>onclick <span class="op">=</span> <span class="kw">async</span> () <span class="op">=&gt;</span> {
+    <span class="kw">for</span> (<span class="kw">const</span> t <span class="kw">of</span> stream<span class="op">.</span><span class="fn">getTracks</span>()) t<span class="op">.</span><span class="fn">stop</span>()<span class="op">;</span>
+    <span class="kw">await</span> client<span class="op">.</span><span class="fn">stop</span>()<span class="op">;</span>
+}<span class="op">;</span></code></pre>
+      <div class="callout callout-tip">
+        <div class="callout-title">Tip</div>
+        <p>Listen to the <code>ended</code> event on the stream's video track to detect when the user clicks the browser's native "Stop sharing" button and call <code>client.stop()</code> accordingly.</p>
       </div>
     </div>
 
@@ -671,10 +716,65 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'str
 <span class="kw">await</span> client<span class="op">.</span><span class="fn">replaceTrack</span>(<span class="str">'video'</span><span class="op">,</span> cam<span class="op">.</span><span class="fn">getVideoTracks</span>()[<span class="num">0</span>])<span class="op">;</span></code></pre>
     </div>
 
+    <div class="doc-section" id="whip-mute-track">
+      <h2>muteTrack() / unmuteTrack() / isTrackMuted() <span class="badge badge-new">NEW in v1.2</span></h2>
+      <div class="method-sig"><span class="fn">muteTrack</span><span class="op">(</span>kind<span class="op">:</span> <span class="str">'audio'</span> <span class="op">|</span> <span class="str">'video'</span><span class="op">):</span> <span class="kw">void</span></div>
+      <div class="method-sig"><span class="fn">unmuteTrack</span><span class="op">(</span>kind<span class="op">:</span> <span class="str">'audio'</span> <span class="op">|</span> <span class="str">'video'</span><span class="op">):</span> <span class="kw">void</span></div>
+      <div class="method-sig"><span class="fn">isTrackMuted</span><span class="op">(</span>kind<span class="op">:</span> <span class="str">'audio'</span> <span class="op">|</span> <span class="str">'video'</span><span class="op">):</span> <span class="kw">boolean</span></div>
+      <p>Mute or unmute the active sender track by toggling <code>MediaStreamTrack.enabled</code>. No renegotiation is required — a muted audio track sends silence, a muted video track sends a black frame. The sender remains active and can be toggled instantly.</p>
+<pre><code><span class="cmt">// Mute microphone</span>
+client<span class="op">.</span><span class="fn">muteTrack</span>(<span class="str">'audio'</span>)<span class="op">;</span>
+
+<span class="cmt">// Check state</span>
+console<span class="op">.</span><span class="fn">log</span>(client<span class="op">.</span><span class="fn">isTrackMuted</span>(<span class="str">'audio'</span>))<span class="op">;</span>  <span class="cmt">// true</span>
+
+<span class="cmt">// Unmute</span>
+client<span class="op">.</span><span class="fn">unmuteTrack</span>(<span class="str">'audio'</span>)<span class="op">;</span></code></pre>
+      <div class="callout callout-info">
+        <div class="callout-title">replaceTrack() vs muteTrack()</div>
+        <p>Use <code>muteTrack()</code> to temporarily silence a sender. Use <code>replaceTrack()</code> when you need to swap to a completely different source (e.g. switching camera to screen share).</p>
+      </div>
+    </div>
+
     <div class="doc-section" id="whip-get-stats">
       <h2>getStats()</h2>
       <div class="method-sig"><span class="fn">getStats</span><span class="op">():</span> <span class="typ">Promise</span><span class="op">&lt;</span><span class="typ">StreamStats</span><span class="op">&gt;</span></div>
       <p>Returns a normalised snapshot of the current session. Bitrate values are computed as a delta since the previous call — call periodically (e.g. every 2 s) for meaningful readings. See <a href="#connection-stats">Connection Stats</a> for the full type reference.</p>
+    </div>
+
+    <div class="doc-section" id="whip-watch-stats">
+      <h2>watchStats() <span class="badge badge-new">NEW in v1.2</span></h2>
+      <div class="method-sig"><span class="fn">watchStats</span><span class="op">(</span>intervalMs<span class="op">:</span> <span class="typ">number</span><span class="op">,</span> callback<span class="op">:</span> (stats<span class="op">:</span> <span class="typ">StreamStats</span>) <span class="op">=&gt;</span> <span class="kw">void</span><span class="op">):</span> () <span class="op">=&gt;</span> <span class="kw">void</span></div>
+      <p>Polls <code>getStats()</code> on a fixed interval and invokes <code>callback</code> with each snapshot. Returns a zero-argument cleanup function that stops polling when called. A convenience alternative to writing your own <code>setInterval</code>.</p>
+<pre><code><span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats) <span class="op">=&gt;</span> {
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'quality'</span><span class="op">,</span> stats<span class="op">.</span>quality)<span class="op">;</span>
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'video bitrate'</span><span class="op">,</span> stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>
+})<span class="op">;</span>
+
+<span class="cmt">// Stop when you're done</span>
+<span class="fn">stopWatching</span>()<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="whip-audio-level">
+      <h2>Audio Level Monitor <span class="badge badge-new">NEW in v1.2</span></h2>
+      <div class="method-sig"><span class="fn">startAudioLevelMonitor</span><span class="op">(</span>intervalMs<span class="op">?:</span> <span class="typ">number</span><span class="op">):</span> <span class="kw">void</span></div>
+      <div class="method-sig"><span class="fn">stopAudioLevelMonitor</span><span class="op">():</span> <span class="kw">void</span></div>
+      <p>Starts polling the outgoing audio sender's amplitude via an <code>AudioContext</code> + <code>AnalyserNode</code> and emits <code>'audiolevel'</code> events at the given interval. The emitted <code>level</code> is a normalised RMS value in <strong>[0, 1]</strong> — useful for building "speaking" indicators.</p>
+      <p>The monitor is stopped automatically by <code>stop()</code> and during reconnects. <code>stopAudioLevelMonitor()</code> also closes the underlying <code>AudioContext</code>.</p>
+<pre><code><span class="kw">await</span> client<span class="op">.</span><span class="fn">publish</span>(stream)<span class="op">;</span>
+
+client<span class="op">.</span><span class="fn">startAudioLevelMonitor</span>(<span class="num">100</span>)<span class="op">;</span>  <span class="cmt">// poll every 100 ms (default)</span>
+
+client<span class="op">.</span><span class="fn">on</span>(<span class="str">'audiolevel'</span><span class="op">,</span> (level) <span class="op">=&gt;</span> {
+    micIndicator<span class="op">.</span>style<span class="op">.</span>opacity <span class="op">=</span> level<span class="op">;</span>  <span class="cmt">// 0 = silence, 1 = max</span>
+})<span class="op">;</span>
+
+<span class="cmt">// Stop when you no longer need it</span>
+client<span class="op">.</span><span class="fn">stopAudioLevelMonitor</span>()<span class="op">;</span></code></pre>
+      <div class="callout callout-warn">
+        <div class="callout-title">After publish()</div>
+        <p>Call <code>startAudioLevelMonitor()</code> after <code>publish()</code> resolves — the audio sender must exist before monitoring can start.</p>
+      </div>
     </div>
 
     <div class="doc-section" id="whip-events">
@@ -688,7 +788,8 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'str
             <tr><td><code>failed</code></td><td>error: Error</td><td>Connection has irrecoverably failed.</td></tr>
             <tr><td><code>reconnecting</code></td><td>attempt: number, delayMs: number</td><td>Auto-reconnect attempt is starting.</td></tr>
             <tr><td><code>reconnected</code></td><td>—</td><td>Auto-reconnect successfully restored the session.</td></tr>
-            <tr><td><code>qualitychange</code></td><td>quality: ConnectionQuality</td><td>Adaptive quality changed the effective bitrate level. <span class="badge badge-new">NEW</span></td></tr>
+            <tr><td><code>qualitychange</code></td><td>quality: ConnectionQuality</td><td>Adaptive quality changed the effective bitrate level.</td></tr>
+            <tr><td><code>audiolevel</code></td><td>level: number</td><td>Normalised RMS audio amplitude [0–1]. Only emitted while <code>startAudioLevelMonitor()</code> is active. <span class="badge badge-new">v1.2</span></td></tr>
             <tr><td><code>connectionstatechange</code></td><td>state: RTCPeerConnectionState</td><td>Raw <code>RTCPeerConnection</code> state change.</td></tr>
             <tr><td><code>iceconnectionstatechange</code></td><td>state: RTCIceConnectionState</td><td>ICE connection state change.</td></tr>
             <tr><td><code>icegatheringstatechange</code></td><td>state: RTCIceGatheringState</td><td>ICE gathering state change.</td></tr>
@@ -932,15 +1033,18 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'rec
 
     <div class="doc-section" id="connection-stats">
       <h2>Connection Stats</h2>
-      <p>Poll <code>getStats()</code> to monitor stream health. Bitrate is computed as a delta between consecutive calls.</p>
-<pre><code><span class="kw">const</span> timer <span class="op">=</span> <span class="fn">setInterval</span>(<span class="kw">async</span> () <span class="op">=&gt;</span> {
-    <span class="kw">const</span> stats <span class="op">=</span> <span class="kw">await</span> client<span class="op">.</span><span class="fn">getStats</span>()<span class="op">;</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>quality)<span class="op">;</span>           <span class="cmt">// 'excellent' | 'good' | 'fair' | 'poor'</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>roundTripTime)<span class="op">;</span>     <span class="cmt">// seconds</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>    <span class="cmt">// bps</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>frameRate)<span class="op">;</span>  <span class="cmt">// fps</span>
+      <p>Poll <code>getStats()</code> to monitor stream health, or use the <a href="#whip-watch-stats"><code>watchStats()</code></a> helper to avoid writing your own interval. Bitrate is computed as a delta between consecutive calls.</p>
+<pre><code><span class="cmt">// One-shot</span>
+<span class="kw">const</span> stats <span class="op">=</span> <span class="kw">await</span> client<span class="op">.</span><span class="fn">getStats</span>()<span class="op">;</span>
+
+<span class="cmt">// Continuous polling via watchStats()</span>
+<span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats) <span class="op">=&gt;</span> {
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>quality)<span class="op">;</span>               <span class="cmt">// 'excellent' | 'good' | 'fair' | 'poor'</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>roundTripTime)<span class="op">;</span>         <span class="cmt">// seconds</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>        <span class="cmt">// bps</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>frameRate)<span class="op">;</span>      <span class="cmt">// fps</span>
     console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>audio<span class="op">?.</span>packetsLostRate)<span class="op">;</span> <span class="cmt">// 0–1</span>
-}<span class="op">,</span> <span class="num">2_000</span>)<span class="op">;</span></code></pre>
+})<span class="op">;</span></code></pre>
 
       <h3>StreamStats</h3>
       <div class="table-wrap">
@@ -1142,6 +1246,7 @@ cleanup()<span class="op">;</span>  <span class="cmt">// remove event listeners 
     AudioEncodingOptions<span class="op">,</span>
     VideoLayerOptions<span class="op">,</span>
     PublishOptions<span class="op">,</span>
+    PublishScreenOptions<span class="op">,</span>           <span class="cmt">// NEW in v1.2</span>
     ViewOptions<span class="op">,</span>
 
     <span class="cmt">// Reconnect & adaptive quality</span>
