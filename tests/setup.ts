@@ -169,6 +169,10 @@ class MockMediaStream {
 	id = 'mock-stream';
 	private tracks: MediaStreamTrack[] = [];
 
+	constructor(tracks?: MediaStreamTrack[]) {
+		if (tracks) this.tracks = [...tracks];
+	}
+
 	addTrack(track: MediaStreamTrack) {
 		this.tracks.push(track);
 	}
