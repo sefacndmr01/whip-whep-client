@@ -59,12 +59,12 @@ jobs:
           cache: npm
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install latest npm
+      - name: Upgrade npm
         run: |
           TARBALL=$(curl -sf https://registry.npmjs.org/npm/latest | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d).dist.tarball))")
-          mkdir -p /tmp/npm-latest
-          curl -sf "$TARBALL" | tar xz --strip-components=1 -C /tmp/npm-latest
-          echo "/tmp/npm-latest/bin" >> $GITHUB_PATH
+          NPM_DIR=$(node -e "process.stdout.write(require('path').resolve(process.execPath,'../../lib/node_modules/npm'))")
+          curl -sf "$TARBALL" | tar xz --strip-components=1 -C "$NPM_DIR"
+          npm --version
 
       - run: npm ci
         env:
