@@ -1,5 +1,11 @@
 # whip-whep-client
 
+## 1.2.2
+
+### Patch Changes
+
+- dd32d54: fix several issues
+
 ## 1.2.1
 
 ### Patch Changes
