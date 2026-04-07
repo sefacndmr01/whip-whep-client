@@ -5,6 +5,7 @@ import type {
 	PublishOptions,
 	PublishScreenOptions,
 	StreamStats,
+	StatsHistory,
 	AudioStats,
 	VideoStats,
 	AdaptiveQualityOptions,
@@ -14,7 +15,7 @@ import { WHIPError, InvalidStateError } from '../core/errors.js';
 import { preferCodec, addSimulcast, setBandwidth, patchFmtp } from '../utils/sdp.js';
 import { setupIceTrickle } from '../utils/ice.js';
 import { getScreenStream } from '../utils/media.js';
-import { computeQuality, type StatsSnapshot } from '../utils/stats.js';
+import { computeQuality, StatsHistoryImpl, type StatsSnapshot } from '../utils/stats.js';
 import {
 	DEFAULT_SIMULCAST_LAYERS,
 	toRtcEncoding,
@@ -421,25 +422,39 @@ export class WHIPClient extends BaseClient<WHIPClientEvents> {
 
 	/**
 	 * Poll `getStats()` on a fixed interval and invoke `callback` with each
-	 * snapshot. Returns a cleanup function that stops the polling when called.
+	 * snapshot and a rolling history window. Returns a cleanup function that
+	 * stops the polling when called.
 	 *
 	 * @example
 	 * ```ts
-	 * const stop = client.watchStats(2_000, (stats) => {
+	 * const stop = client.watchStats(2_000, (stats, history) => {
 	 *   console.log('bitrate', stats.video?.bitrate);
+	 *   console.log('avg bitrate (10s)', history.avgVideoBitrate());
+	 *   console.log('delta', stats.video!.bitrate - (history.prev?.video?.bitrate ?? 0));
 	 * });
 	 * // Later:
 	 * stop();
 	 * ```
 	 *
-	 * @param intervalMs How often to collect stats in milliseconds.
-	 * @param callback   Invoked with each `StreamStats` snapshot.
+	 * @param intervalMs  How often to collect stats in milliseconds.
+	 * @param callback    Invoked with each `StreamStats` snapshot and the
+	 *                    rolling `StatsHistory` window.
+	 * @param historySize Maximum number of past snapshots retained in the
+	 *                    history window. Defaults to `10`.
 	 * @returns A zero-argument cleanup function that cancels polling.
 	 */
-	watchStats(intervalMs: number, callback: (stats: StreamStats) => void): () => void {
+	watchStats(
+		intervalMs: number,
+		callback: (stats: StreamStats, history: StatsHistory) => void,
+		historySize = 10,
+	): () => void {
+		const history = new StatsHistoryImpl(historySize);
 		const timer = setInterval(() => {
 			void this.getStats()
-				.then(callback)
+				.then((stats) => {
+					history.push(stats);
+					callback(stats, history);
+				})
 				.catch(() => {});
 		}, intervalMs);
 		return () => clearInterval(timer);

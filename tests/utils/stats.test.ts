@@ -1,5 +1,100 @@
 import { describe, it, expect } from 'vitest';
-import { computeQuality } from '../../src/utils/stats.js';
+import { computeQuality, StatsHistoryImpl } from '../../src/utils/stats.js';
+import type { StreamStats } from '../../src/core/types.js';
+
+const makeStats = (
+	videoBitrate: number,
+	audioBitrate: number,
+	lossRate = 0,
+	rtt: number | null = null,
+): StreamStats => ({
+	timestamp: Date.now(),
+	audio: { bitrate: audioBitrate, packetsLost: 0, packetsLostRate: lossRate, jitter: 0 },
+	video: {
+		bitrate: videoBitrate,
+		packetsLost: 0,
+		packetsLostRate: lossRate,
+		frameRate: 30,
+		width: 1280,
+		height: 720,
+	},
+	roundTripTime: rtt,
+	quality: 'excellent',
+});
+
+describe('StatsHistoryImpl', () => {
+	it('starts empty', () => {
+		const h = new StatsHistoryImpl(5);
+		expect(h.snapshots).toHaveLength(0);
+		expect(h.prev).toBeNull();
+	});
+
+	it('prev is null after first push', () => {
+		const h = new StatsHistoryImpl(5);
+		h.push(makeStats(1000, 500));
+		expect(h.prev).toBeNull();
+	});
+
+	it('prev returns the second-to-last snapshot after two pushes', () => {
+		const h = new StatsHistoryImpl(5);
+		const a = makeStats(1000, 500);
+		const b = makeStats(2000, 600);
+		h.push(a);
+		h.push(b);
+		expect(h.prev).toBe(a);
+	});
+
+	it('evicts oldest entry when historySize is exceeded', () => {
+		const h = new StatsHistoryImpl(3);
+		const s = [makeStats(100, 50), makeStats(200, 60), makeStats(300, 70), makeStats(400, 80)];
+		for (const snap of s) h.push(snap);
+		expect(h.snapshots).toHaveLength(3);
+		expect(h.snapshots[0]).toBe(s[1]);
+		expect(h.snapshots[2]).toBe(s[3]);
+	});
+
+	it('avgVideoBitrate averages across window', () => {
+		const h = new StatsHistoryImpl(10);
+		h.push(makeStats(1000, 0));
+		h.push(makeStats(3000, 0));
+		expect(h.avgVideoBitrate()).toBe(2000);
+	});
+
+	it('avgAudioBitrate averages across window', () => {
+		const h = new StatsHistoryImpl(10);
+		h.push(makeStats(0, 100));
+		h.push(makeStats(0, 300));
+		expect(h.avgAudioBitrate()).toBe(200);
+	});
+
+	it('avgPacketLossRate averages audio and video loss rates', () => {
+		const h = new StatsHistoryImpl(10);
+		h.push(makeStats(1000, 500, 0.1));
+		expect(h.avgPacketLossRate()).toBeCloseTo(0.1);
+	});
+
+	it('avgRoundTripTime skips null values', () => {
+		const h = new StatsHistoryImpl(10);
+		h.push(makeStats(1000, 500, 0, null));
+		h.push(makeStats(1000, 500, 0, 0.1));
+		h.push(makeStats(1000, 500, 0, 0.3));
+		expect(h.avgRoundTripTime()).toBeCloseTo(0.2);
+	});
+
+	it('returns null from helpers when no snapshots', () => {
+		const h = new StatsHistoryImpl(10);
+		expect(h.avgVideoBitrate()).toBeNull();
+		expect(h.avgAudioBitrate()).toBeNull();
+		expect(h.avgPacketLossRate()).toBeNull();
+		expect(h.avgRoundTripTime()).toBeNull();
+	});
+
+	it('returns null from avgRoundTripTime when all values are null', () => {
+		const h = new StatsHistoryImpl(10);
+		h.push(makeStats(1000, 500, 0, null));
+		expect(h.avgRoundTripTime()).toBeNull();
+	});
+});
 
 describe('computeQuality', () => {
 	// ---- excellent ----------------------------------------------------------

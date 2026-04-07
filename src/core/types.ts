@@ -128,6 +128,51 @@ export interface VideoStats {
 }
 
 /**
+ * A rolling window of past `StreamStats` snapshots passed as the second
+ * argument to the `watchStats` callback.
+ *
+ * The window holds up to `historySize` entries (default `10`). Each new
+ * snapshot is appended; once the cap is reached the oldest entry is evicted.
+ */
+export interface StatsHistory {
+	/**
+	 * All snapshots collected so far, in chronological order (oldest first,
+	 * newest last). Contains at most `historySize` entries.
+	 */
+	readonly snapshots: ReadonlyArray<StreamStats>;
+
+	/**
+	 * The snapshot from the previous polling interval, or `null` on the very
+	 * first callback invocation. Equivalent to `snapshots.at(-2)`.
+	 */
+	readonly prev: StreamStats | null;
+
+	/**
+	 * Mean video bitrate across all snapshots in the window, in **bits per
+	 * second**. Returns `null` when no snapshot contains video stats.
+	 */
+	avgVideoBitrate(): number | null;
+
+	/**
+	 * Mean audio bitrate across all snapshots in the window, in **bits per
+	 * second**. Returns `null` when no snapshot contains audio stats.
+	 */
+	avgAudioBitrate(): number | null;
+
+	/**
+	 * Mean packet-loss rate (0–1) across all audio and video tracks in the
+	 * window. Returns `null` when no stats are available yet.
+	 */
+	avgPacketLossRate(): number | null;
+
+	/**
+	 * Mean round-trip time in **seconds** across all snapshots in the window.
+	 * Returns `null` when no RTT measurements are available yet.
+	 */
+	avgRoundTripTime(): number | null;
+}
+
+/**
  * Normalised snapshot of `RTCPeerConnection.getStats()` returned by
  * `WHIPClient.getStats()` and `WHEPClient.getStats()`.
  */

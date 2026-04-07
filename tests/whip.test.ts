@@ -1178,7 +1178,10 @@ describe('WHIPClient – watchStats', () => {
 
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(callback).toHaveBeenCalledOnce();
-		expect(callback).toHaveBeenCalledWith(mockStats);
+		expect(callback).toHaveBeenCalledWith(
+			mockStats,
+			expect.objectContaining({ snapshots: [mockStats] }),
+		);
 
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(callback).toHaveBeenCalledTimes(2);
