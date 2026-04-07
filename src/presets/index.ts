@@ -153,6 +153,148 @@ export const cloudflare = {
 };
 
 // ---------------------------------------------------------------------------
+// Millicast (Dolby.io Real-time Streaming)
+// ---------------------------------------------------------------------------
+
+/**
+ * Presets for Millicast (Dolby.io Real-time Streaming).
+ *
+ * Millicast is a managed WebRTC CDN with global delivery via WHIP ingest
+ * and WHEP egress. Authentication uses Bearer tokens issued by the Millicast
+ * Director API — never embed long-lived tokens in client code.
+ *
+ * Endpoint formats:
+ * - WHIP: `https://director.millicast.com/api/whip/<streamName>`
+ * - WHEP: `https://director.millicast.com/api/whep/<streamName>`
+ *
+ * @see https://docs.dolby.io/streaming-apis/docs/whip
+ * @see https://docs.dolby.io/streaming-apis/docs/whep
+ */
+export const millicast = {
+	/**
+	 * Recommended options for publishing to Millicast via WHIP.
+	 *
+	 * @param token Short-lived publish token obtained from the Millicast Director API.
+	 */
+	whip(token: string): WHIPPreset {
+		return {
+			token,
+			videoCodec: 'h264',
+			audio: {
+				dtx: true,
+				fec: true,
+				stereo: true,
+			},
+		};
+	},
+
+	/**
+	 * Recommended options for viewing from Millicast via WHEP.
+	 *
+	 * @param token Short-lived subscribe token obtained from the Millicast Director API.
+	 */
+	whep(token: string): WHEPPreset {
+		return {
+			token,
+			videoCodec: 'h264',
+		};
+	},
+};
+
+// ---------------------------------------------------------------------------
+// SRS (Simple Realtime Server)
+// ---------------------------------------------------------------------------
+
+/**
+ * Presets for SRS (Simple Realtime Server).
+ *
+ * SRS is a popular open-source media server with native WHIP and WHEP
+ * support. By default no authentication is required; to enable it, set
+ * `http_hooks` or `security` in `srs.conf` and pass the generated token.
+ *
+ * Endpoint formats:
+ * - WHIP: `http://<host>:1985/rtc/v1/whip/?app=<app>&stream=<streamName>`
+ * - WHEP: `http://<host>:1985/rtc/v1/whep/?app=<app>&stream=<streamName>`
+ *
+ * @see https://ossrs.io/lts/en-us/docs/v6/doc/whip
+ */
+export const srs = {
+	/**
+	 * Recommended options for publishing to SRS via WHIP.
+	 *
+	 * @param token Auth token (omit when SRS security hooks are disabled).
+	 */
+	whip(token?: string): WHIPPreset {
+		return {
+			...(token && { token }),
+			videoCodec: 'h264',
+			audio: {
+				fec: true,
+			},
+		};
+	},
+
+	/**
+	 * Recommended options for viewing from SRS via WHEP.
+	 *
+	 * @param token Auth token (omit when SRS security hooks are disabled).
+	 */
+	whep(token?: string): WHEPPreset {
+		return {
+			...(token && { token }),
+			videoCodec: 'h264',
+		};
+	},
+};
+
+// ---------------------------------------------------------------------------
+// MediaMTX
+// ---------------------------------------------------------------------------
+
+/**
+ * Presets for MediaMTX (formerly rtsp-simple-server).
+ *
+ * MediaMTX is a lightweight, zero-dependency media server that supports
+ * WHIP and WHEP out of the box. Authentication is optional and configured
+ * via `mediamtx.yml`; when enabled, pass the credentials as a Bearer token.
+ *
+ * Endpoint formats:
+ * - WHIP: `http://<host>:8889/<pathName>/whip`
+ * - WHEP: `http://<host>:8889/<pathName>/whep`
+ *
+ * @see https://github.com/bluenviron/mediamtx#webrtc
+ */
+export const mediamtx = {
+	/**
+	 * Recommended options for publishing to MediaMTX via WHIP.
+	 *
+	 * @param token Internal authentication token (omit when auth is disabled).
+	 */
+	whip(token?: string): WHIPPreset {
+		return {
+			...(token && { token }),
+			videoCodec: 'h264',
+			audio: {
+				fec: true,
+				dtx: true,
+			},
+		};
+	},
+
+	/**
+	 * Recommended options for viewing from MediaMTX via WHEP.
+	 *
+	 * @param token Internal authentication token (omit when auth is disabled).
+	 */
+	whep(token?: string): WHEPPreset {
+		return {
+			...(token && { token }),
+			videoCodec: 'h264',
+		};
+	},
+};
+
+// ---------------------------------------------------------------------------
 // Ant Media Server
 // ---------------------------------------------------------------------------
 

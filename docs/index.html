@@ -467,6 +467,9 @@
         <a class="nav-item" href="#preset-ovenmedia">OvenMedia Engine</a>
         <a class="nav-item" href="#preset-cloudflare">Cloudflare Stream</a>
         <a class="nav-item" href="#preset-antmedia">Ant Media Server</a>
+        <a class="nav-item" href="#preset-millicast">Millicast</a>
+        <a class="nav-item" href="#preset-srs">SRS</a>
+        <a class="nav-item" href="#preset-mediamtx">MediaMTX</a>
       </div>
 
       <div class="nav-group">
@@ -1201,6 +1204,60 @@ cleanup()<span class="op">;</span>  <span class="cmt">// remove event listeners 
 <span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
     endpoint<span class="op">:</span> <span class="str">'https://ams.example.com:5443/WebRTCAppEE/whip/stream1'</span><span class="op">,</span>
     <span class="op">...</span>antmedia<span class="op">.</span><span class="fn">whip</span>(jwtToken)<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-millicast">
+      <h2>Preset — Millicast <span class="badge badge-new">NEW in v1.2.1</span></h2>
+      <p><a href="https://dolby.io/products/real-time-streaming/" target="_blank" rel="noopener">Millicast</a> (Dolby.io Real-time Streaming) is a managed WebRTC CDN that delivers sub-second latency at global scale. The preset enforces H.264 and enables stereo Opus with DTX and FEC. Tokens must be obtained from the Millicast Director API server-side — never embed long-lived API secrets in client code.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> millicast } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Publish</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://director.millicast.com/api/whip/my-stream'</span><span class="op">,</span>
+    <span class="op">...</span>millicast<span class="op">.</span><span class="fn">whip</span>(publishToken)<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// View</span>
+<span class="kw">const</span> viewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'https://director.millicast.com/api/whep/my-stream'</span><span class="op">,</span>
+    <span class="op">...</span>millicast<span class="op">.</span><span class="fn">whep</span>(subscribeToken)<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-srs">
+      <h2>Preset — SRS <span class="badge badge-new">NEW in v1.2.1</span></h2>
+      <p><a href="https://ossrs.io" target="_blank" rel="noopener">SRS (Simple Realtime Server)</a> is a widely-used open-source media server with native WHIP and WHEP support. Authentication is optional — configure <code>http_hooks</code> or <code>security</code> in <code>srs.conf</code> if needed.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> srs } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Publish (no auth)</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:1985/rtc/v1/whip/?app=live&amp;stream=stream1'</span><span class="op">,</span>
+    <span class="op">...</span>srs<span class="op">.</span><span class="fn">whip</span>()<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// View</span>
+<span class="kw">const</span> viewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:1985/rtc/v1/whep/?app=live&amp;stream=stream1'</span><span class="op">,</span>
+    <span class="op">...</span>srs<span class="op">.</span><span class="fn">whep</span>()<span class="op">,</span>
+})<span class="op">;</span></code></pre>
+    </div>
+
+    <div class="doc-section" id="preset-mediamtx">
+      <h2>Preset — MediaMTX <span class="badge badge-new">NEW in v1.2.1</span></h2>
+      <p><a href="https://github.com/bluenviron/mediamtx" target="_blank" rel="noopener">MediaMTX</a> (formerly rtsp-simple-server) is a lightweight, zero-dependency media server with built-in WHIP and WHEP support. Authentication is configured via <code>mediamtx.yml</code> and is optional.</p>
+<pre><code><span class="kw">import</span> { WHIPClient<span class="op">,</span> WHEPClient<span class="op">,</span> mediamtx } <span class="kw">from</span> <span class="str">'whip-whep-client'</span><span class="op">;</span>
+
+<span class="cmt">// Publish (no auth)</span>
+<span class="kw">const</span> publisher <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHIPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:8889/stream1/whip'</span><span class="op">,</span>
+    <span class="op">...</span>mediamtx<span class="op">.</span><span class="fn">whip</span>()<span class="op">,</span>
+})<span class="op">;</span>
+
+<span class="cmt">// View</span>
+<span class="kw">const</span> viewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">WHEPClient</span>({
+    endpoint<span class="op">:</span> <span class="str">'http://localhost:8889/stream1/whep'</span><span class="op">,</span>
+    <span class="op">...</span>mediamtx<span class="op">.</span><span class="fn">whep</span>()<span class="op">,</span>
 })<span class="op">;</span></code></pre>
     </div>
 
