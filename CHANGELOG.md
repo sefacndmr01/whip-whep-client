@@ -1,5 +1,11 @@
 # whip-whep-client
 
+## 1.2.2
+
+### Patch Changes
+
+- 66a5985: Fix CI
+
 ## 1.2.1
 
 ### Patch Changes
