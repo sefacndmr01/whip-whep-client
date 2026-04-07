@@ -59,14 +59,18 @@ jobs:
           cache: npm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install latest npm
+        run: |
+          TARBALL=$(curl -sf https://registry.npmjs.org/npm/latest | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d).dist.tarball))")
+          mkdir -p /tmp/npm-latest
+          curl -sf "$TARBALL" | tar xz --strip-components=1 -C /tmp/npm-latest
+          echo "/tmp/npm-latest/bin" >> $GITHUB_PATH
+
       - run: npm ci
         env:
           HUSKY: 0
 
-      - name: Publish to npm
-        run: |
-          npm config delete '//registry.npmjs.org/:_authToken'
-          npm publish --provenance --access public
+      - run: npm publish --provenance --access public
         env:
           HUSKY: 0
 
