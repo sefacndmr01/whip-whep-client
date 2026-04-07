@@ -234,13 +234,28 @@ Captures a screen, window, or browser tab via `getDisplayMedia` and publishes it
 | `videoConstraints` | `MediaTrackConstraints`                | —       | Constraints forwarded to `getDisplayMedia` (resolution, frame rate, etc.) |
 | `publishOptions` | `Omit<PublishOptions, 'audio' \| 'video'>` | —     | Extra options forwarded to the underlying `publish()` call (e.g. `signal`) |
 
-### `watchStats(intervalMs, callback)`
+### `watchStats(intervalMs, callback, historySize?)`
 
 ```ts
-const stop = client.watchStats(intervalMs: number, callback: (stats: StreamStats) => void): () => void
+const stop = client.watchStats(
+    intervalMs: number,
+    callback: (stats: StreamStats, history: StatsHistory) => void,
+    historySize?: number,   // default: 10
+): () => void
 ```
 
-Polls `getStats()` on a fixed interval and calls `callback` with each snapshot. Returns a cleanup function — call it to stop polling. Equivalent to a `setInterval` around `getStats()` but automatically cancelled when `stop()` is called.
+Polls `getStats()` on a fixed interval and calls `callback` with each snapshot and a rolling `StatsHistory` window. Returns a cleanup function — call it to stop polling. The optional `historySize` parameter caps how many past snapshots are retained (default `10`).
+
+**`StatsHistory`**
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `snapshots` | `ReadonlyArray<StreamStats>` | All snapshots in the window, oldest first. |
+| `prev` | `StreamStats \| null` | Previous snapshot. `null` on the first call. |
+| `avgVideoBitrate()` | `number \| null` | Rolling mean video bitrate in bps. |
+| `avgAudioBitrate()` | `number \| null` | Rolling mean audio bitrate in bps. |
+| `avgPacketLossRate()` | `number \| null` | Rolling mean packet-loss rate (0–1). |
+| `avgRoundTripTime()` | `number \| null` | Rolling mean RTT in seconds. |
 
 ### `startAudioLevelMonitor(intervalMs?)` / `stopAudioLevelMonitor()`
 
@@ -560,13 +575,18 @@ client.stopAudioLevelMonitor();
 
 ### Watching Stats
 
-`watchStats` is a convenience wrapper around `getStats()` that handles the interval and cleanup:
+`watchStats` is a convenience wrapper around `getStats()` that handles the interval and cleanup. The callback receives a rolling `StatsHistory` window as its second argument:
 
 ```ts
-const stopWatching = client.watchStats(1_000, (stats) => {
-    console.log('Quality:', stats.quality);
-    console.log('Video bitrate:', stats.video?.bitrate, 'bps');
-    console.log('RTT:', stats.roundTripTime, 's');
+const stopWatching = client.watchStats(1_000, (stats, history) => {
+    console.log('Quality:',     stats.quality);
+    console.log('Bitrate:',     stats.video?.bitrate, 'bps');
+    console.log('Avg bitrate:', history.avgVideoBitrate(), 'bps');  // rolling mean
+    console.log('Avg loss:',    history.avgPacketLossRate());        // trend
+
+    // Delta since the previous snapshot
+    const delta = (stats.video?.bitrate ?? 0) - (history.prev?.video?.bitrate ?? 0);
+    console.log('Δ bitrate:', delta, 'bps');
 });
 
 // Stop polling (also cancelled automatically by stop()):

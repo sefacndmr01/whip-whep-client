@@ -747,15 +747,37 @@ client<span class="op">.</span><span class="fn">unmuteTrack</span>(<span class="
 
     <div class="doc-section" id="whip-watch-stats">
       <h2>watchStats() <span class="badge badge-new">NEW in v1.2</span></h2>
-      <div class="method-sig"><span class="fn">watchStats</span><span class="op">(</span>intervalMs<span class="op">:</span> <span class="typ">number</span><span class="op">,</span> callback<span class="op">:</span> (stats<span class="op">:</span> <span class="typ">StreamStats</span>) <span class="op">=&gt;</span> <span class="kw">void</span><span class="op">):</span> () <span class="op">=&gt;</span> <span class="kw">void</span></div>
-      <p>Polls <code>getStats()</code> on a fixed interval and invokes <code>callback</code> with each snapshot. Returns a zero-argument cleanup function that stops polling when called. A convenience alternative to writing your own <code>setInterval</code>.</p>
-<pre><code><span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats) <span class="op">=&gt;</span> {
-    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'quality'</span><span class="op">,</span> stats<span class="op">.</span>quality)<span class="op">;</span>
-    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'video bitrate'</span><span class="op">,</span> stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>
+      <div class="method-sig"><span class="fn">watchStats</span><span class="op">(</span>intervalMs<span class="op">:</span> <span class="typ">number</span><span class="op">,</span> callback<span class="op">:</span> (stats<span class="op">:</span> <span class="typ">StreamStats</span><span class="op">,</span> history<span class="op">:</span> <span class="typ">StatsHistory</span>) <span class="op">=&gt;</span> <span class="kw">void</span><span class="op">,</span> historySize<span class="op">?:</span> <span class="typ">number</span><span class="op">):</span> () <span class="op">=&gt;</span> <span class="kw">void</span></div>
+      <p>Polls <code>getStats()</code> on a fixed interval and invokes <code>callback</code> with each snapshot and a rolling <code>StatsHistory</code> window. Returns a zero-argument cleanup function that stops polling when called. The optional <code>historySize</code> parameter caps the window (default <code>10</code>).</p>
+<pre><code><span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats<span class="op">,</span> history) <span class="op">=&gt;</span> {
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'quality'</span><span class="op">,</span>    stats<span class="op">.</span>quality)<span class="op">;</span>
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'bitrate'</span><span class="op">,</span>    stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>
+    console<span class="op">.</span><span class="fn">log</span>(<span class="str">'avg bitrate'</span><span class="op">,</span> history<span class="op">.</span><span class="fn">avgVideoBitrate</span>())<span class="op">;</span>   <span class="cmt">// rolling mean</span>
+
+    <span class="kw">const</span> prev <span class="op">=</span> history<span class="op">.</span>prev<span class="op">;</span>
+    <span class="kw">if</span> (prev<span class="op">?.</span>video) {
+        <span class="kw">const</span> delta <span class="op">=</span> (stats<span class="op">.</span>video<span class="op">?.</span>bitrate <span class="op">??</span> <span class="num">0</span>) <span class="op">-</span> prev<span class="op">.</span>video<span class="op">.</span>bitrate<span class="op">;</span>
+        console<span class="op">.</span><span class="fn">log</span>(<span class="str">'Δ bitrate'</span><span class="op">,</span> delta)<span class="op">;</span>                   <span class="cmt">// trend</span>
+    }
 })<span class="op">;</span>
 
 <span class="cmt">// Stop when you're done</span>
 <span class="fn">stopWatching</span>()<span class="op">;</span></code></pre>
+
+      <h3>StatsHistory</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Member</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>snapshots</code></td><td>ReadonlyArray&lt;StreamStats&gt;</td><td>All snapshots in the window, oldest first. Capped at <code>historySize</code>.</td></tr>
+            <tr><td><code>prev</code></td><td>StreamStats | null</td><td>Snapshot from the previous interval. <code>null</code> on the first call.</td></tr>
+            <tr><td><code>avgVideoBitrate()</code></td><td>number | null</td><td>Mean video bitrate across the window in bps.</td></tr>
+            <tr><td><code>avgAudioBitrate()</code></td><td>number | null</td><td>Mean audio bitrate across the window in bps.</td></tr>
+            <tr><td><code>avgPacketLossRate()</code></td><td>number | null</td><td>Mean packet-loss rate (0–1) across audio and video tracks in the window.</td></tr>
+            <tr><td><code>avgRoundTripTime()</code></td><td>number | null</td><td>Mean RTT in seconds across the window. Skips <code>null</code> entries.</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="doc-section" id="whip-audio-level">
@@ -1041,12 +1063,13 @@ client<span class="op">.</span><span class="fn">on</span>(<span class="str">'rec
 <span class="kw">const</span> stats <span class="op">=</span> <span class="kw">await</span> client<span class="op">.</span><span class="fn">getStats</span>()<span class="op">;</span>
 
 <span class="cmt">// Continuous polling via watchStats()</span>
-<span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats) <span class="op">=&gt;</span> {
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>quality)<span class="op">;</span>               <span class="cmt">// 'excellent' | 'good' | 'fair' | 'poor'</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>roundTripTime)<span class="op">;</span>         <span class="cmt">// seconds</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>        <span class="cmt">// bps</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>frameRate)<span class="op">;</span>      <span class="cmt">// fps</span>
-    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>audio<span class="op">?.</span>packetsLostRate)<span class="op">;</span> <span class="cmt">// 0–1</span>
+<span class="kw">const</span> stopWatching <span class="op">=</span> client<span class="op">.</span><span class="fn">watchStats</span>(<span class="num">2_000</span><span class="op">,</span> (stats<span class="op">,</span> history) <span class="op">=&gt;</span> {
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>quality)<span class="op">;</span>                      <span class="cmt">// 'excellent' | 'good' | 'fair' | 'poor'</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>roundTripTime)<span class="op">;</span>                <span class="cmt">// seconds</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>bitrate)<span class="op">;</span>               <span class="cmt">// bps (current)</span>
+    console<span class="op">.</span><span class="fn">log</span>(history<span class="op">.</span><span class="fn">avgVideoBitrate</span>())<span class="op">;</span>          <span class="cmt">// bps (rolling mean)</span>
+    console<span class="op">.</span><span class="fn">log</span>(history<span class="op">.</span><span class="fn">avgPacketLossRate</span>())<span class="op">;</span>        <span class="cmt">// 0–1 (rolling mean)</span>
+    console<span class="op">.</span><span class="fn">log</span>(stats<span class="op">.</span>video<span class="op">?.</span>frameRate)<span class="op">;</span>             <span class="cmt">// fps</span>
 })<span class="op">;</span></code></pre>
 
       <h3>StreamStats</h3>
