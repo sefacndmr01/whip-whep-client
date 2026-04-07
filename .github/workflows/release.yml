@@ -59,13 +59,14 @@ jobs:
           cache: npm
           registry-url: 'https://registry.npmjs.org'
 
-      - run: npm install -g npm@latest --ignore-scripts
-
       - run: npm ci
         env:
           HUSKY: 0
 
-      - run: npm publish --provenance --access public
+      - name: Publish to npm
+        run: |
+          npm config delete '//registry.npmjs.org/:_authToken'
+          npm publish --provenance --access public
         env:
           HUSKY: 0
 
