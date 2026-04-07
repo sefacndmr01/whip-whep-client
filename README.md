@@ -1122,6 +1122,117 @@ const viewer = new WHEPClient({
 
 ---
 
+### Millicast
+
+[Millicast](https://dolby.io/products/real-time-streaming/) (Dolby.io Real-time Streaming) is a managed WebRTC CDN that delivers sub-second latency at global scale via WHIP ingest and WHEP egress.
+
+
+|                |                                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| WHIP endpoint  | `https://director.millicast.com/api/whip/<streamName>`                                  |
+| WHEP endpoint  | `https://director.millicast.com/api/whep/<streamName>`                                  |
+| Authentication | Short-lived publish/subscribe token from the Millicast Director API (Bearer)             |
+| Docs           | [docs.dolby.io/streaming-apis/docs/whip](https://docs.dolby.io/streaming-apis/docs/whip) |
+
+
+```ts
+import { WHIPClient, WHEPClient, millicast } from 'whip-whep-client';
+
+// Publish
+const publisher = new WHIPClient({
+    endpoint: 'https://director.millicast.com/api/whip/my-stream',
+    ...millicast.whip(publishToken),
+});
+const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+await publisher.publish(stream);
+
+// View
+const viewer = new WHEPClient({
+    endpoint: 'https://director.millicast.com/api/whep/my-stream',
+    ...millicast.whep(subscribeToken),
+});
+const remoteStream = await viewer.view();
+videoEl.srcObject = remoteStream;
+```
+
+The preset enforces H.264 and enables stereo Opus with DTX and FEC. Tokens are short-lived — obtain them server-side from the Millicast Director API and never embed long-lived API secrets in client code.
+
+---
+
+### SRS
+
+[SRS (Simple Realtime Server)](https://ossrs.io) is a popular open-source media server with native WHIP and WHEP support.
+
+
+|                |                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| WHIP endpoint  | `http://<host>:1985/rtc/v1/whip/?app=<app>&stream=<streamName>`                          |
+| WHEP endpoint  | `http://<host>:1985/rtc/v1/whep/?app=<app>&stream=<streamName>`                          |
+| Authentication | Optional — configure `http_hooks` or `security` in `srs.conf`                            |
+| Docs           | [ossrs.io/lts/en-us/docs/v6/doc/whip](https://ossrs.io/lts/en-us/docs/v6/doc/whip)      |
+
+
+```ts
+import { WHIPClient, WHEPClient, srs } from 'whip-whep-client';
+
+// Publish (no auth)
+const publisher = new WHIPClient({
+    endpoint: 'http://localhost:1985/rtc/v1/whip/?app=live&stream=stream1',
+    ...srs.whip(),
+});
+
+// Publish (with auth token)
+const publisher = new WHIPClient({
+    endpoint: 'http://localhost:1985/rtc/v1/whip/?app=live&stream=stream1',
+    ...srs.whip(token),
+});
+
+// View
+const viewer = new WHEPClient({
+    endpoint: 'http://localhost:1985/rtc/v1/whep/?app=live&stream=stream1',
+    ...srs.whep(),
+});
+```
+
+---
+
+### MediaMTX
+
+[MediaMTX](https://github.com/bluenviron/mediamtx) (formerly rtsp-simple-server) is a lightweight, zero-dependency media server with built-in WHIP and WHEP support. It requires no external dependencies and is configured via a single `mediamtx.yml` file.
+
+
+|                |                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| WHIP endpoint  | `http://<host>:8889/<pathName>/whip`                                                              |
+| WHEP endpoint  | `http://<host>:8889/<pathName>/whep`                                                              |
+| Authentication | Optional — configured per-path in `mediamtx.yml`                                                 |
+| Docs           | [github.com/bluenviron/mediamtx#webrtc](https://github.com/bluenviron/mediamtx#webrtc)           |
+
+
+```ts
+import { WHIPClient, WHEPClient, mediamtx } from 'whip-whep-client';
+
+// Publish (no auth)
+const publisher = new WHIPClient({
+    endpoint: 'http://localhost:8889/stream1/whip',
+    ...mediamtx.whip(),
+});
+
+// Publish (with auth token)
+const publisher = new WHIPClient({
+    endpoint: 'http://localhost:8889/stream1/whip',
+    ...mediamtx.whip(token),
+});
+
+// View
+const viewer = new WHEPClient({
+    endpoint: 'http://localhost:8889/stream1/whep',
+    ...mediamtx.whep(),
+});
+```
+
+---
+
 ### Other servers
 
 Any WHIP or WHEP-compliant server works without a preset. Pass the `endpoint` and any required authentication directly:
