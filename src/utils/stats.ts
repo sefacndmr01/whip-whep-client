@@ -1,4 +1,4 @@
-import type { ConnectionQuality } from '../core/types.js';
+import type { ConnectionQuality, StatsHistory, StreamStats } from '../core/types.js';
 
 // ---------------------------------------------------------------------------
 // StatsSnapshot (shared by WHIPClient and WHEPClient)
@@ -13,6 +13,59 @@ export interface StatsSnapshot {
 	audioBytes: number;
 	videoBytes: number;
 }
+
+// ---------------------------------------------------------------------------
+// StatsHistoryImpl
+// ---------------------------------------------------------------------------
+
+/** @internal */
+export class StatsHistoryImpl implements StatsHistory {
+	private readonly _buf: StreamStats[] = [];
+	private readonly _max: number;
+
+	constructor(maxSize: number) {
+		this._max = maxSize;
+	}
+
+	push(snapshot: StreamStats): void {
+		this._buf.push(snapshot);
+		if (this._buf.length > this._max) this._buf.shift();
+	}
+
+	get snapshots(): ReadonlyArray<StreamStats> {
+		return this._buf;
+	}
+
+	get prev(): StreamStats | null {
+		return this._buf.length >= 2 ? (this._buf[this._buf.length - 2] ?? null) : null;
+	}
+
+	avgVideoBitrate(): number | null {
+		return avg(this._buf.map((s) => s.video?.bitrate));
+	}
+
+	avgAudioBitrate(): number | null {
+		return avg(this._buf.map((s) => s.audio?.bitrate));
+	}
+
+	avgPacketLossRate(): number | null {
+		const rates: number[] = [];
+		for (const s of this._buf) {
+			if (s.audio != null) rates.push(s.audio.packetsLostRate);
+			if (s.video != null) rates.push(s.video.packetsLostRate);
+		}
+		return avg(rates);
+	}
+
+	avgRoundTripTime(): number | null {
+		return avg(this._buf.map((s) => s.roundTripTime));
+	}
+}
+
+const avg = (values: Array<number | null | undefined>): number | null => {
+	const nums = values.filter((v): v is number => v != null);
+	return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+};
 
 // ---------------------------------------------------------------------------
 // computeQuality

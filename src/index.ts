@@ -26,6 +26,7 @@ export type {
 	AudioStats,
 	VideoStats,
 	StreamStats,
+	StatsHistory,
 } from './core/types.js';
 
 // Errors
